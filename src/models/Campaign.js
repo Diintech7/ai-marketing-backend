@@ -24,7 +24,19 @@ const adSchema = new mongoose.Schema({
     description: String,
     cta: { type: String, default: "LEARN_MORE" },
   },
+  metaAdCopy: {
+    headline: String,
+    primaryText: String,
+    description: String,
+    cta: { type: String, default: "LEARN_MORE" },
+  },
+  googleAdCopy: {
+    headlines: [{ type: String }],
+    descriptions: [{ type: String }],
+    videoHeadline: String,
+  },
   imageUrl: { type: String, default: null },
+  link: { type: String, default: null },
   status: { type: String, enum: ["active", "paused", "deleted"], default: "paused" },
 });
 
@@ -54,6 +66,7 @@ const campaignSchema = new mongoose.Schema(
     budgetType: { type: String, enum: ["daily", "weekly", "monthly", "lifetime"], default: "daily" },
     startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
+    link: { type: String, default: null },
     adSets: [adSetSchema],
     ads: [adSchema],
     aiGenerated: { type: Boolean, default: false },

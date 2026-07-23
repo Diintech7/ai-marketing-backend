@@ -1,6 +1,8 @@
 import axios from "axios";
+import https from "https";
 import AppError from "../utils/AppError.js";
 
+const httpsAgent = new https.Agent({ keepAlive: true });
 
 const BASE = "https://googleads.googleapis.com/v23";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -12,7 +14,7 @@ const getAccessToken = async (refreshToken) => {
       client_secret: process.env.GOOGLE_CLIENT_SECRET,
       refresh_token: refreshToken,
       grant_type: "refresh_token",
-    });
+    }, { httpsAgent });
     return data.access_token;
   } catch (err) {
     const msg = err.response?.data?.error_description || err.response?.data?.error || "Failed to get Google access token";
@@ -40,7 +42,8 @@ const client = (accessToken, developerToken, customerId) => {
   return axios.create({
     baseURL,
     headers,
-    timeout: 20000,
+    timeout: 30000,
+    httpsAgent,
   });
 };
 
@@ -60,6 +63,12 @@ const CHANNEL_MAP = {
   search: "SEARCH",
   display: "DISPLAY",
   youtube: "VIDEO",
+};
+
+const cleanText = (text, maxLength) => {
+  if (!text) return "";
+  let cleaned = text.replace(/[\u{10000}-\u{10FFFF}]/gu, '');
+  return cleaned.trim().substring(0, maxLength).trim();
 };
 
 const GoogleAdsService = {
@@ -103,8 +112,9 @@ const GoogleAdsService = {
             advertisingChannelType: CHANNEL_MAP[campaign.googleAdType] || "SEARCH",
             campaignBudget: budgetId,
             manualCpc: {},
-            ...(campaign.startDate && { startDateTime: `${campaign.startDate.toISOString().slice(0, 10)} 00:00:00` }),
-            ...(campaign.endDate && { endDateTime: `${campaign.endDate.toISOString().slice(0, 10)} 23:59:59` }),
+            containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
+            ...(campaign.startDate && { startDateTime: new Date(campaign.startDate).toISOString().slice(0, 10) + " 00:00:00" }),
+            ...(campaign.endDate && { endDateTime: new Date(campaign.endDate).toISOString().slice(0, 10) + " 23:59:59" }),
           },
         }],
       });
@@ -130,37 +140,106 @@ const GoogleAdsService = {
     } catch (err) { handleError(err); }
   },
 
-  createAd: async (creds, adGroupResourceName, adCopy, adType = "search") => {
+  addKeywordsToAdGroup: async (creds, adGroupResourceName, keywords) => {
+    if (!keywords || keywords.length === 0) return;
+    try {
+      const token = await getAccessToken(creds.refreshToken);
+      const api = client(token, creds.developerToken, creds.customerId);
+      const operations = keywords.map(kw => ({
+        create: {
+          adGroup: adGroupResourceName,
+          status: "ENABLED",
+          keyword: { text: kw, matchType: "BROAD" }
+        }
+      }));
+      await api.post("/adGroupCriteria:mutate", { operations });
+    } catch (err) {
+      console.error("[Google Ads] Failed to add keywords:", err.response?.data || err.message);
+    }
+  },
+
+  uploadImageAsset: async (creds, imageUrl, type = "square") => {
+    try {
+      if (!imageUrl) return null;
+      const token = await getAccessToken(creds.refreshToken);
+      const api = client(token, creds.developerToken, creds.customerId);
+      const sharp = (await import('sharp')).default;
+
+      // Fetch image
+      const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+      let buffer = Buffer.from(response.data, 'binary');
+
+      if (type === "landscape") {
+        buffer = await sharp(buffer).resize(1200, 628, { fit: 'cover' }).toBuffer(); // 1.91:1
+      } else {
+        buffer = await sharp(buffer).resize(1024, 1024, { fit: 'cover' }).toBuffer(); // 1:1
+      }
+      
+      const base64Data = buffer.toString('base64');
+
+      const res = await api.post("/assets:mutate", {
+        operations: [{
+          create: {
+            type: "IMAGE",
+            imageAsset: { data: base64Data },
+            name: `AI_Image_${type}_${Date.now()}`
+          }
+        }]
+      });
+      return res.data.results[0].resourceName;
+    } catch (err) {
+      console.error("[Google Ads] Image upload failed:", err.response?.data || err.message);
+      return null;
+    }
+  },
+
+  createAd: async (creds, adGroupResourceName, googleAdCopy, adType = "search", finalUrl = "https://www.example.com", imageUrl = null) => {
     try {
       const token = await getAccessToken(creds.refreshToken);
       const api = client(token, creds.developerToken, creds.customerId);
 
+      // Fallbacks in case old schema is passed
+      const headlines = googleAdCopy.headlines && googleAdCopy.headlines.length > 0 
+        ? googleAdCopy.headlines.map(h => ({ text: cleanText(h, 30) }))
+        : [{ text: cleanText(googleAdCopy.headline || "Special Offer", 30) }, { text: cleanText(googleAdCopy.description || "Learn More", 30) }, { text: "Special Offer Today" }];
+      
+      const descriptions = googleAdCopy.descriptions && googleAdCopy.descriptions.length > 0
+        ? googleAdCopy.descriptions.map(d => ({ text: cleanText(d, 90) }))
+        : [{ text: cleanText(googleAdCopy.primaryText || googleAdCopy.description || "Discover our amazing services", 90) }, { text: "Contact us today for more information." }];
+
       let adPayload;
       if (adType === "search") {
         adPayload = {
-          responsiveSearchAd: {
-            headlines: [{ text: adCopy.headline }, { text: adCopy.description || adCopy.headline }],
-            descriptions: [{ text: adCopy.primaryText || adCopy.description }],
-          },
-          finalUrls: ["https://example.com"],
+          responsiveSearchAd: { headlines, descriptions },
+          finalUrls: [finalUrl],
         };
       } else if (adType === "display") {
+        let landscapeAsset = null;
+        let squareAsset = null;
+        
+        if (imageUrl) {
+          landscapeAsset = await GoogleAdsService.uploadImageAsset(creds, imageUrl, "landscape");
+          squareAsset = await GoogleAdsService.uploadImageAsset(creds, imageUrl, "square");
+        }
+        
         adPayload = {
           responsiveDisplayAd: {
-            headlines: [{ text: adCopy.headline }],
-            descriptions: [{ text: adCopy.primaryText || adCopy.description }],
-            marketingImages: [],
-            squareMarketingImages: [],
+            headlines: [headlines[0]],
+            longHeadline: descriptions[0], // up to 90 chars
+            descriptions: [descriptions[0]],
+            businessName: "Diin Tech",
+            marketingImages: landscapeAsset ? [{ asset: landscapeAsset }] : [],
+            squareMarketingImages: squareAsset ? [{ asset: squareAsset }] : [],
           },
-          finalUrls: ["https://example.com"],
+          finalUrls: [finalUrl],
         };
       } else {
         adPayload = {
           videoAd: {
             video: { resourceName: "" },
-            inStream: { actionHeadline: adCopy.headline },
+            inStream: { actionHeadline: cleanText(googleAdCopy.videoHeadline || googleAdCopy.headline || "Special Offer", 15) },
           },
-          finalUrls: ["https://example.com"],
+          finalUrls: [finalUrl],
         };
       }
 
@@ -183,7 +262,15 @@ const GoogleAdsService = {
 
   enableCampaign: (creds, id) => GoogleAdsService.updateStatus(creds, id, "ENABLED"),
   pauseCampaign: (creds, id) => GoogleAdsService.updateStatus(creds, id, "PAUSED"),
-  removeCampaign: (creds, id) => GoogleAdsService.updateStatus(creds, id, "REMOVED"),
+  removeCampaign: async (creds, googleCampaignId) => {
+    try {
+      const token = await getAccessToken(creds.refreshToken);
+      const api = client(token, creds.developerToken, creds.customerId);
+      await api.post("/campaigns:mutate", {
+        operations: [{ remove: googleCampaignId }],
+      });
+    } catch (err) { handleError(err); }
+  },
 
   getInsights: async (creds, googleCampaignId) => {
     try {

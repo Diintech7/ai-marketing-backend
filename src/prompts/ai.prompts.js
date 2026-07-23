@@ -11,19 +11,37 @@ Return STRICT JSON:
 }`
   }),
   adCopy: ({ product, audience, tone = "professional", cta = "Learn More" }) => ({
-    systemPrompt: "You are an expert Meta Ads copywriter. Return ONLY valid JSON.",
-    prompt: `Write a Meta ad copy for:
+    systemPrompt: "You are an expert digital marketing copywriter. Return ONLY valid JSON.",
+    prompt: `Write 3 different ad copy variations for:
 Product/Service: ${product}
 Target Audience: ${audience}
 Tone: ${tone}
 CTA: ${cta}
 
-Return JSON:
+RULES:
+1. "metaAdCopy": Can include emojis. Engaging and catchy.
+2. "googleAdCopy": MUST strictly follow length limits. NO EMOJIS ALLOWED AT ALL.
+   - headlines: 3 to 5 options. MAX 30 characters each.
+   - descriptions: 2 options. MAX 90 characters each.
+   - videoHeadline: MAX 15 characters.
+
+Return JSON EXACTLY like this:
 {
-  "headline": "...",
-  "primaryText": "...",
-  "description": "...",
-  "cta": "${cta}"
+  "ads": [
+    {
+      "metaAdCopy": {
+        "headline": "...",
+        "primaryText": "...",
+        "description": "...",
+        "cta": "${cta}"
+      },
+      "googleAdCopy": {
+        "headlines": ["...", "...", "..."],
+        "descriptions": ["...", "..."],
+        "videoHeadline": "..."
+      }
+    }
+  ]
 }`,
   }),
 
@@ -136,4 +154,78 @@ Return JSON:
   "adCopy": { "headline": "...", "primaryText": "...", "description": "...", "cta": "..." }
 }`,
   }),
+
+  magicCampaign: ({ urlText, description, budget, platform, googleAdType }) => {
+    let adCopySchema = "";
+    
+    let googleSchema = "";
+    let googleRules = "";
+    if (googleAdType === "display") {
+      googleSchema = `"googleAdCopy": { "headlines": ["...", "...", "...", "...", "..."], "descriptions": ["...", "...", "...", "..."], "videoHeadline": "..." }`;
+      googleRules = "- CRITICAL FOR GOOGLE DISPLAY ADS: You MUST generate 5 unique headlines (max 30 chars) and 4 descriptions (max 90 chars).";
+    } else if (googleAdType === "youtube") {
+      googleSchema = `"googleAdCopy": { "headlines": ["..."], "descriptions": ["...", "..." ], "videoHeadline": "..." }`;
+      googleRules = "- CRITICAL FOR GOOGLE VIDEO ADS: You MUST generate exactly 1 short videoHeadline (max 15 chars), 1 regular headline (max 30 chars), and 2 descriptions (max 90 chars).";
+    } else {
+      googleSchema = `"googleAdCopy": { "headlines": ["...", "...", "...", "...", "...", "...", "...", "...", "...", "...", "...", "...", "...", "...", "..."], "descriptions": ["...", "...", "...", "..."], "videoHeadline": "..." }`;
+      googleRules = `- Google Ads MUST have EXACTLY 15 UNIQUE headlines and EXACTLY 4 UNIQUE descriptions.
+- CRITICAL FOR GOOGLE SEARCH ADS AD STRENGTH: You MUST generate 5-7 highly relevant keywords in the "keywords" array. Then, you MUST include these EXACT keywords in AT LEAST 5-7 of the 15 headlines. Google Ads penalizes Ad Strength if the target keywords are not present in the headlines. The remaining headlines should be a mix of brand name, benefits, and CTAs.`;
+    }
+
+    if (platform === "meta") {
+      adCopySchema = `"metaAdCopy": { "headline": "...", "primaryText": "...", "description": "...", "cta": "LEARN_MORE" }`;
+    } else if (platform === "google") {
+      adCopySchema = googleSchema;
+    } else {
+      adCopySchema = `"metaAdCopy": { "headline": "...", "primaryText": "...", "description": "...", "cta": "LEARN_MORE" },
+      ${googleSchema}`;
+    }
+
+    return {
+      systemPrompt: "You are an elite Digital Marketing AI. You analyze websites and create complete marketing campaigns. Return ONLY valid JSON.",
+      prompt: `Analyze this business and generate a complete marketing campaign.
+Website Text: ${urlText}
+User Description: ${description}
+Budget: ${budget}
+Platform: ${platform}
+
+Return EXACTLY this JSON structure:
+{
+  "campaign": {
+    "name": "Catchy Campaign Name",
+    "objective": "TRAFFIC",
+    "targeting": {
+      "ageMin": 18,
+      "ageMax": 45,
+      "genders": [1, 2],
+      "locations": [{"city": "Mumbai", "country": "IN", "region": "Maharashtra"}],
+      "interests": [{"id": "0", "name": "Digital Marketing"}]
+    }
+  },
+  "ads": [
+    {
+      ${adCopySchema}
+    },
+    {
+      ${adCopySchema}
+    },
+    {
+      ${adCopySchema}
+    }
+  ],
+  "content": {
+    "hashtags": ["#marketing", "#sales"],
+    "seoTitle": ["SEO Title 1", "SEO Title 2"],
+    "keywords": ["keyword1", "keyword2"],
+    "captions": ["Caption 1", "Caption 2"]
+  },
+  "suggestedImagePrompt": "A highly detailed prompt for DALL-E/Image Gen to generate a visually appealing marketing image for this product, no text in image"
+}
+RULES: 
+- Google Ads MUST STRICTLY follow limits (headlines max 30 chars, descriptions max 90 chars, no emojis). 
+${googleRules}
+- Meta Ads can have emojis.
+- Objective must be one of: AWARENESS, TRAFFIC, ENGAGEMENT, LEADS, APP_PROMOTION, SALES.`
+    };
+  }
 };

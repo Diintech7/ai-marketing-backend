@@ -1,6 +1,8 @@
 import aiProvider from "./ai/aiProvider.js";
 import { prompts } from "../prompts/ai.prompts.js";
 import AppError from "../utils/AppError.js";
+import { scrapeUrlText } from "../utils/url.scraper.js";
+import ImageService from "./image.service.js";
 
 const parseJSON = (text) => {
   try {
@@ -77,6 +79,41 @@ const AIService = {
     const { systemPrompt, prompt } = prompts.campaignSuggestion(input);
     const result = await aiProvider.complete(prompt, { systemPrompt, maxTokens: 2000 });
     return parseJSON(result);
+  },
+
+  generateMagicCampaign: async (input, userId) => {
+    // 1. Scrape URL
+    const urlText = await scrapeUrlText(input.url);
+    if (!urlText && !input.description) {
+      throw new AppError("Could not read the website and no description was provided. Please provide a description.", 400);
+    }
+    
+    // 2. Call AI
+    const { systemPrompt, prompt } = prompts.magicCampaign({
+      urlText,
+      description: input.description || "None",
+      budget: input.budget || 500,
+      platform: input.platform || "both",
+      googleAdType: input.googleAdType || "search"
+    });
+    
+    const result = await aiProvider.complete(prompt, { systemPrompt, maxTokens: 3500 });
+    const parsedData = parseJSON(result);
+
+    // 3. Generate Image optionally
+    if (input.generateImage && parsedData.suggestedImagePrompt) {
+      try {
+        const imageRes = await ImageService.generate({ 
+          prompt: parsedData.suggestedImagePrompt, 
+          userId 
+        });
+        parsedData.imageUrl = imageRes.url;
+      } catch (err) {
+        console.error("Magic Image Gen failed:", err.message);
+      }
+    }
+
+    return parsedData;
   },
 };
 

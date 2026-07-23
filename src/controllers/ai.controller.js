@@ -20,6 +20,7 @@ export const generateHashtags = handler((body) => AIService.generateHashtags(bod
 export const generateCaptions = handler((body) => AIService.generateCaptions(body));
 export const generateCTA = handler((body) => AIService.generateCTA(body));
 export const generateCampaignSuggestion = handler((body) => AIService.generateCampaignSuggestion(body));
+export const generateMagicCampaign = handler((body, user) => AIService.generateMagicCampaign(body, user._id));
 
 export const generateImage = async (req, res, next) => {
   try {

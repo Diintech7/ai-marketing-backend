@@ -17,6 +17,7 @@ router.post("/hashtags",           checkCredits("hashtags"),           ctrl.gene
 router.post("/captions",           checkCredits("captions"),           ctrl.generateCaptions);
 router.post("/cta",                checkCredits("cta"),                ctrl.generateCTA);
 router.post("/campaign-suggestion",checkCredits("campaignSuggestion"), ctrl.generateCampaignSuggestion);
+router.post("/magic-campaign",     checkCredits("campaignSuggestion"), ctrl.generateMagicCampaign);
 router.post("/image",              checkCredits("image"),              ctrl.generateImage);
 
 export default router;

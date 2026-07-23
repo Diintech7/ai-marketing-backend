@@ -2,7 +2,7 @@ import AIService from "../../services/ai.service.js";
 
 export const generateAdCopyTool = {
   name: "generateAdCopy",
-  description: "Generate AI-powered ad copy including headline, description, CTA, and primary text",
+  description: "Generate AI-powered ad copy returning an array of 3 variations with metaAdCopy and googleAdCopy formats",
   inputSchema: {
     type: "object",
     properties: {

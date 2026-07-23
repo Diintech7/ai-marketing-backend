@@ -112,7 +112,7 @@ const CampaignService = {
             const creative = await MetaService.createAdCreative(accessToken, adAccountId, {
               name: ad.name || campaign.name,
               pageId: process.env.META_PAGE_ID,
-              adCopy: ad.adCopy,
+              adCopy: ad.metaAdCopy || ad.adCopy,
               imageHash,
               imageUrl: ad.imageUrl,
               link: ad.link || campaign.link || "https://www.example.com"
@@ -148,9 +148,16 @@ const CampaignService = {
         updates.googleCampaignId = gcId;
         const agId = await GoogleAdsService.createAdGroup(creds, gcId, campaign);
         updates.googleAdGroupId = agId;
+        
+        // Add keywords to Ad Group so Google RSA can get 'Excellent' strength
+        if (campaign.aiContent && campaign.aiContent.keywords) {
+          await GoogleAdsService.addKeywordsToAdGroup(creds, agId, campaign.aiContent.keywords);
+        }
+
         // Create ads from campaign.ads
         for (const ad of campaign.ads) {
-          await GoogleAdsService.createAd(creds, agId, ad.adCopy, campaign.googleAdType);
+          const finalUrl = ad.link || campaign.link || "https://www.example.com";
+          await GoogleAdsService.createAd(creds, agId, ad.googleAdCopy || ad.adCopy, campaign.googleAdType, finalUrl, ad.imageUrl);
         }
       } else {
         await GoogleAdsService.enableCampaign(creds, campaign.googleCampaignId);
@@ -259,7 +266,9 @@ const CampaignService = {
       try {
         const creds = getGoogleCreds(user);
         await GoogleAdsService.removeCampaign(creds, campaign.googleCampaignId);
-      } catch { /* ignore if already removed on Google */ }
+      } catch (err) {
+        console.error("[GoogleAds Delete Error] Failed to remove campaign from Google Ads:", err.message);
+      }
     }
     return campaignRepo.updateById(campaignId, { status: "deleted" });
   },
