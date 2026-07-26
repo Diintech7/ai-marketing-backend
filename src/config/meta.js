@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const META_VERSION = process.env.META_API_VERSION || "v19.0";
+const META_VERSION = process.env.META_API_VERSION || "v25.0";
 const BASE_URL = `https://graph.facebook.com/${META_VERSION}`;
 
 export const metaClient = (accessToken) =>
