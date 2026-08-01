@@ -8,7 +8,9 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true, minlength: 6, select: false },
     company: { type: String, default: "", trim: true },
-    role: { type: String, enum: Object.values(ROLES), default: ROLES.USER },
+    role: { type: String, enum: Object.values(ROLES), default: ROLES.CLIENT },
+    approvalStatus: { type: String, enum: ["pending", "approved", "rejected"], default: "pending" },
+    assignedAdmin: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     avatar: { type: String, default: "" },
 
     // Email Verification

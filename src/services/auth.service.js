@@ -15,11 +15,12 @@ const AuthService = {
       name,
       email,
       password,
-      emailVerifyToken: verifyToken,
-      emailVerifyExpires: Date.now() + 24 * 60 * 60 * 1000,
+      // emailVerifyToken: verifyToken,
+      // emailVerifyExpires: Date.now() + 24 * 60 * 60 * 1000,
+      isEmailVerified: true, // Auto verify for now as per user request
     });
 
-    await sendVerificationEmail(email, verifyToken);
+    // await sendVerificationEmail(email, verifyToken);
     return { id: user._id, name: user.name, email: user.email };
   },
 
@@ -29,6 +30,13 @@ const AuthService = {
       throw new AppError("Invalid email or password", 401);
 
     if (!user.isEmailVerified) throw new AppError("Please verify your email first", 401);
+    
+    if (user.role === "client" && user.approvalStatus === "pending") {
+      throw new AppError("Your account is pending admin approval.", 403);
+    }
+    if (user.role === "client" && user.approvalStatus === "rejected") {
+      throw new AppError("Your account registration was rejected.", 403);
+    }
 
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);

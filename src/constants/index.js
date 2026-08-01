@@ -1,4 +1,4 @@
-export const ROLES = { ADMIN: "admin", USER: "user" };
+export const ROLES = { SUPERADMIN: "super_admin", ADMIN: "admin", CLIENT: "client" };
 
 export const PLANS = {
   FREE: "free",

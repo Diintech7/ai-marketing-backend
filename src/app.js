@@ -59,6 +59,10 @@ import aiRoutes from "./routes/ai.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
 import emailRoutes from "./routes/email.routes.js";
+import leadRoutes from "./routes/lead.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
+
 app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/campaigns", campaignRoutes);
@@ -67,6 +71,9 @@ app.use("/api/ai", aiRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/emails", emailRoutes);
+app.use("/api/leads", leadRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/admin", adminRoutes);
 
 // Background Jobs
 import cron from "node-cron";

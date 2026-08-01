@@ -14,6 +14,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "axios": "^1.7.0",
     "bcryptjs": "^2.4.3",
+    "cheerio": "^1.2.0",
     "cloudinary": "^2.0.0",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
@@ -28,6 +29,9 @@
     "multer": "^2.2.0",
     "node-cron": "^4.6.0",
     "nodemailer": "^6.9.0",
+    "puppeteer": "^25.4.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "razorpay": "^2.9.0",
     "sharp": "^0.35.3"
   },
