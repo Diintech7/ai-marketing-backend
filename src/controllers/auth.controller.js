@@ -17,14 +17,17 @@ export const login = async (req, res, next) => {
 
 export const logout = (req, res, next) => {
   try {
-    AuthService.logout(res);
+    const portal = req.query.portal || 'client';
+    AuthService.logout(res, portal);
     successResponse(res, {}, "Logged out successfully");
   } catch (err) { next(err); }
 };
 
 export const refreshToken = async (req, res, next) => {
   try {
-    const data = await AuthService.refreshToken(req.cookies.refreshToken);
+    const portal = req.query.portal || 'client';
+    const token = req.cookies[`${portal}_refreshToken`];
+    const data = await AuthService.refreshToken(token);
     successResponse(res, data, "Token refreshed");
   } catch (err) { next(err); }
 };

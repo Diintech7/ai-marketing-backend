@@ -28,5 +28,6 @@ router.get("/admins/:id/clients", restrictTo(ROLES.SUPERADMIN), adminController.
 // Admin Only Routes
 // ----------------------------------------------------
 router.get("/my-clients", restrictTo(ROLES.ADMIN, ROLES.SUPERADMIN), adminController.getMyClients);
+router.put("/clients/:id/features", restrictTo(ROLES.ADMIN, ROLES.SUPERADMIN), adminController.updateClientFeatures);
 
 export default router;

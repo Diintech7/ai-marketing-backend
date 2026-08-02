@@ -105,8 +105,36 @@ export const getAdminClients = async (req, res, next) => {
 // Get clients assigned to the currently logged in Admin (Admin only)
 export const getMyClients = async (req, res, next) => {
   try {
-    const clients = await User.find({ role: ROLES.CLIENT, assignedAdmin: req.user._id }).select("name email role createdAt approvalStatus");
+    const clients = await User.find({ role: ROLES.CLIENT, assignedAdmin: req.user._id }).select("name email role createdAt approvalStatus accessibleFeatures");
     successResponse(res, clients, "Your clients fetched successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Update accessible features for a client
+export const updateClientFeatures = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { features } = req.body;
+    
+    // Ensure the client belongs to the admin (if not superadmin)
+    const query = { _id: id, role: ROLES.CLIENT };
+    if (req.user.role === ROLES.ADMIN) {
+      query.assignedAdmin = req.user._id;
+    }
+
+    const client = await User.findOneAndUpdate(
+      query,
+      { accessibleFeatures: features },
+      { new: true, runValidators: true }
+    ).select("name email accessibleFeatures");
+
+    if (!client) {
+      throw new AppError("Client not found or not assigned to you", 404);
+    }
+
+    successResponse(res, client, "Client features updated successfully");
   } catch (err) {
     next(err);
   }

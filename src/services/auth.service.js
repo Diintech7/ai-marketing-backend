@@ -3,7 +3,7 @@ import AuthRepository from "../repositories/auth.repository.js";
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from "../helpers/jwt.js";
 import { sendVerificationEmail, sendPasswordResetEmail } from "../helpers/email.js";
 import AppError from "../utils/AppError.js";
-import { COOKIE_OPTIONS } from "../constants/index.js";
+import { COOKIE_OPTIONS, ROLES } from "../constants/index.js";
 
 const AuthService = {
   register: async ({ name, email, password }) => {
@@ -24,10 +24,22 @@ const AuthService = {
     return { id: user._id, name: user.name, email: user.email };
   },
 
-  login: async ({ email, password }, res) => {
+  login: async ({ email, password, portal }, res) => {
     const user = await AuthRepository.findByEmail(email);
     if (!user || !(await user.comparePassword(password)))
       throw new AppError("Invalid email or password", 401);
+
+    if (portal) {
+      if (portal === 'superadmin' && user.role !== ROLES.SUPERADMIN) {
+         throw new AppError("Access denied. Please use the client portal.", 403);
+      }
+      if (portal === 'admin' && user.role !== ROLES.ADMIN) {
+         throw new AppError("Access denied. Please use the client portal.", 403);
+      }
+      if (portal === 'client' && (user.role === ROLES.ADMIN || user.role === ROLES.SUPERADMIN)) {
+         throw new AppError("Admins must login through the admin portal.", 403);
+      }
+    }
 
     if (!user.isEmailVerified) throw new AppError("Please verify your email first", 401);
     
@@ -41,16 +53,17 @@ const AuthService = {
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
 
-    res.cookie("refreshToken", refreshToken, COOKIE_OPTIONS);
+    const cookieName = portal ? `${portal}_refreshToken` : "client_refreshToken";
+    res.cookie(cookieName, refreshToken, COOKIE_OPTIONS);
 
     return {
       accessToken,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role, plan: user.plan, credits: user.credits },
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, plan: user.plan, credits: user.credits, accessibleFeatures: user.accessibleFeatures },
     };
   },
 
-  logout: (res) => {
-    res.clearCookie("refreshToken");
+  logout: (res, portal = "client") => {
+    res.clearCookie(`${portal}_refreshToken`);
   },
 
   refreshToken: async (token) => {

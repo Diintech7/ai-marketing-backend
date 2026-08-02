@@ -41,6 +41,12 @@ const userSchema = new mongoose.Schema(
     googleAdsRefreshToken:  { type: String, select: false, default: null },
     googleAdsDeveloperToken:{ type: String, select: false, default: null },
 
+    // Feature-Based Access Control (RBAC)
+    accessibleFeatures: { 
+      type: [String], 
+      default: ["campaigns", "email_marketing", "ai_agent", "tools", "leads", "analytics"] 
+    },
+
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
