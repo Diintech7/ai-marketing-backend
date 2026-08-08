@@ -62,6 +62,8 @@ import emailRoutes from "./routes/email.routes.js";
 import leadRoutes from "./routes/lead.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
+import externalRoutes from "./routes/external.routes.js";
+import webhookRoutes from "./routes/webhook.routes.js";
 
 app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
@@ -74,6 +76,8 @@ app.use("/api/emails", emailRoutes);
 app.use("/api/leads", leadRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/v1/external", externalRoutes);
+app.use("/api/webhooks", webhookRoutes);
 
 // Background Jobs
 import cron from "node-cron";

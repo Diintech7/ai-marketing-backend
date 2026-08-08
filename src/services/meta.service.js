@@ -81,12 +81,41 @@ const MetaService = {
         }
       }
 
+      let optimization_goal = "REACH";
+      let promoted_object = undefined;
+      const obj = payload.objective || "TRAFFIC";
+
+      if (obj === "TRAFFIC") {
+        optimization_goal = "LINK_CLICKS";
+      } else if (obj === "CONVERSIONS" || obj === "SALES" || obj === "APP_PROMOTION") {
+        optimization_goal = "OFFSITE_CONVERSIONS";
+        if (payload.pixelId) {
+          promoted_object = {
+            pixel_id: payload.pixelId,
+            custom_event_type: "LEAD"
+          };
+        }
+      } else if (obj === "LEADS") {
+        optimization_goal = "LEAD_GENERATION";
+        const pageId = payload.pageId || process.env.META_PAGE_ID;
+        if (pageId) {
+          promoted_object = { page_id: pageId };
+        }
+      } else if (obj === "ENGAGEMENT") {
+        optimization_goal = "POST_ENGAGEMENT";
+      }
+
+      console.log("[DEBUG createAdSet] Objective:", obj);
+      console.log("[DEBUG createAdSet] Optimization Goal:", optimization_goal);
+      console.log("[DEBUG createAdSet] Promoted Object:", promoted_object);
+
       const { data } = await metaClient(accessToken).post(`/act_${adAccountId}/adsets`, {
         name: payload.name,
         campaign_id: payload.metaCampaignId,
         daily_budget: effectiveDailyBudget, // in paise (INR smallest unit)
         billing_event: "IMPRESSIONS",
-        optimization_goal: "REACH",
+        optimization_goal: optimization_goal,
+        promoted_object: promoted_object,
         bid_strategy: "LOWEST_COST_WITHOUT_CAP",
         status: "PAUSED",
         targeting: buildTargeting(payload.targeting),
@@ -97,6 +126,29 @@ const MetaService = {
     } catch (err) { handleMetaError(err); }
   },
 
+  // ─── Lead Gen Form ─────────────────────────────────────────
+  createLeadGenForm: async (accessToken, pageId, payload) => {
+    try {
+      const formPayload = {
+        name: `Lead Form - ${payload.name} - ${Date.now()}`,
+        questions: [
+          { type: "FULL_NAME" },
+          { type: "EMAIL" },
+          { type: "PHONE" }
+        ],
+        privacy_policy: {
+          url: payload.link || "https://diintech.com/privacy-policy",
+          link_text: "Privacy Policy"
+        },
+        follow_up_action_url: payload.link || "https://diintech.com",
+        status: "ACTIVE"
+      };
+
+      const { data } = await metaClient(accessToken).post(`/${pageId}/leadgen_forms`, formPayload);
+      return data.id; // Returns lead_gen_form_id
+    } catch (err) { handleMetaError(err); }
+  },
+
   // ─── Ad Creative + Ad ──────────────────────────────────────
   createAdCreative: async (accessToken, adAccountId, payload) => {
     try {
@@ -104,22 +156,44 @@ const MetaService = {
         const VALID_CTAS = ["BOOK_TRAVEL","CONTACT_US","DONATE","DONATE_NOW","DOWNLOAD","GET_DIRECTIONS","GO_LIVE","INTERESTED","LEARN_MORE","SEE_DETAILS","LIKE_PAGE","MESSAGE_PAGE","RAISE_MONEY","SAVE","SEND_TIP","SHOP_NOW","SIGN_UP","VIEW_INSTAGRAM_PROFILE","INSTAGRAM_MESSAGE","LOYALTY_LEARN_MORE","PURCHASE_GIFT_CARDS","PAY_TO_ACCESS","SEE_MORE","TRY_IN_CAMERA","WHATSAPP_LINK","GET_IN_TOUCH","TRY_NOW","ASK_A_QUESTION","START_A_CHAT","CHAT_NOW","ASK_US","CHAT_WITH_US","BOOK_NOW","CHECK_AVAILABILITY","ORDER_NOW","WHATSAPP_MESSAGE","GET_MOBILE_APP","INSTALL_MOBILE_APP","USE_MOBILE_APP","INSTALL_APP","USE_APP","PLAY_GAME","TRY_DEMO","WATCH_VIDEO","WATCH_MORE","OPEN_LINK","NO_BUTTON","LISTEN_MUSIC","MOBILE_DOWNLOAD","GET_OFFER","GET_OFFER_VIEW","BUY_NOW","BUY_TICKETS","UPDATE_APP","BET_NOW","ADD_TO_CART","SELL_NOW","GET_SHOWTIMES","LISTEN_NOW","GET_EVENT_TICKETS","REMIND_ME","SEARCH_MORE","PRE_REGISTER","SWIPE_UP_PRODUCT","SWIPE_UP_SHOP","PLAY_GAME_ON_FACEBOOK","VISIT_WORLD","OPEN_INSTANT_APP","JOIN_GROUP","GET_PROMOTIONS","SEND_UPDATES","INQUIRE_NOW","VISIT_PROFILE","CHAT_ON_WHATSAPP","EXPLORE_MORE","CONFIRM","JOIN_CHANNEL","MAKE_AN_APPOINTMENT","ASK_ABOUT_SERVICES","BOOK_A_CONSULTATION","GET_A_QUOTE","BUY_VIA_MESSAGE","ASK_FOR_MORE_INFO","VIEW_PRODUCT","VIEW_CHANNEL","WATCH_LIVE_VIDEO","JOIN_LIVE_VIDEO","IMAGINE","CALL","MISSED_CALL","CALL_NOW","CALL_ME","APPLY_NOW","BUY","GET_QUOTE","SUBSCRIBE","RECORD_NOW","VOTE_NOW","GIVE_FREE_RIDES","REGISTER_NOW","OPEN_MESSENGER_EXT","EVENT_RSVP","CIVIC_ACTION","SEND_INVITES","REFER_FRIENDS","REQUEST_TIME","SEE_MENU","SEARCH","TRY_IT","TRY_ON","LINK_CARD","DIAL_CODE","FIND_YOUR_GROUPS","START_ORDER"];
         if (!VALID_CTAS.includes(ctaType)) ctaType = "LEARN_MORE";
 
-        const { data } = await metaClient(accessToken).post(`/act_${adAccountId}/adcreatives`, {
-        name: `${payload.name}_creative`,
-        object_story_spec: {
-          page_id: payload.pageId,
-          link_data: {
+        const objectStorySpec = { page_id: payload.pageId };
+        
+        let leadGenFormId = null;
+        if (payload.objective === "LEADS") {
+          leadGenFormId = await MetaService.createLeadGenForm(accessToken, payload.pageId, payload);
+          ctaType = "SIGN_UP"; // Usually preferred for lead forms
+        }
+
+        const ctaValue = leadGenFormId 
+          ? { lead_gen_form_id: leadGenFormId }
+          : { link: payload.link || "https://example.com" };
+
+        if (payload.videoId) {
+          objectStorySpec.video_data = {
+            video_id: payload.videoId,
+            message: payload.adCopy.primaryText,
+            title: payload.adCopy.headline,
+            call_to_action: { type: ctaType, value: ctaValue }
+          };
+          if (payload.thumbnailUrl) {
+            objectStorySpec.video_data.image_url = payload.thumbnailUrl;
+          } else if (payload.imageUrl && !payload.imageUrl.endsWith(".mp4") && !payload.imageUrl.includes("/video/upload/")) {
+            objectStorySpec.video_data.image_url = payload.imageUrl; 
+          }
+        } else {
+          objectStorySpec.link_data = {
             message: payload.adCopy.primaryText,
             link: payload.link || "https://example.com",
             name: payload.adCopy.headline,
             description: payload.adCopy.description,
-            call_to_action: { 
-              type: ctaType,
-              value: { link: payload.link || "https://example.com" }
-            },
+            call_to_action: { type: ctaType, value: ctaValue },
             ...(payload.imageHash ? { image_hash: payload.imageHash } : (payload.imageUrl && { picture: payload.imageUrl })),
-          },
-        },
+          };
+        }
+
+        const { data } = await metaClient(accessToken).post(`/act_${adAccountId}/adcreatives`, {
+        name: `${payload.name}_creative`,
+        object_story_spec: objectStorySpec,
       });
       return data;
     } catch (err) { handleMetaError(err); }
@@ -163,6 +237,15 @@ const MetaService = {
     } catch (err) { handleMetaError(err); }
   },
 
+  uploadVideo: async (accessToken, adAccountId, videoUrl) => {
+    try {
+      const { data } = await metaClient(accessToken).post(`/act_${adAccountId}/advideos`, {
+        file_url: videoUrl
+      });
+      return data.id;
+    } catch (err) { handleMetaError(err); }
+  },
+
   // ─── Insights ──────────────────────────────────────────────
   getCampaignInsights: async (accessToken, metaCampaignId, dateRange = "last_30d") => {
     try {
@@ -194,13 +277,18 @@ const MetaService = {
 const buildTargeting = (targeting = {}) => ({
   age_min: targeting.ageMin || 18,
   age_max: targeting.ageMax || 65,
+  targeting_automation: {
+    advantage_audience: 0
+  },
   ...(targeting.genders?.length && { genders: targeting.genders }),
   geo_locations: {
-    cities: targeting.locations?.map((l) => ({
-      key: l.city,
-      country: l.country || "IN",
+    custom_locations: targeting.locations?.filter(l => l.lat && l.lng).map((l) => ({
+      latitude: l.lat,
+      longitude: l.lng,
+      radius: l.radius || 10,
+      distance_unit: "kilometer"
     })) || [],
-    countries: targeting.locations?.length ? [] : ["IN"],
+    countries: targeting.locations?.length && targeting.locations.some(l => l.lat) ? [] : ["IN"],
   },
   ...(targeting.interests?.length && {
     flexible_spec: [{ interests: targeting.interests.map((i) => ({ id: i.id, name: i.name })) }],

@@ -17,13 +17,16 @@ export const getPendingClients = async (req, res, next) => {
 export const approveClient = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { assignedAdminId } = req.body;
+    const { assignedAdminId, adMode } = req.body;
 
     const client = await User.findById(id);
     if (!client) throw new AppError("Client not found", 404);
     if (client.role !== ROLES.CLIENT) throw new AppError("Only clients can be approved", 400);
 
     client.approvalStatus = "approved";
+    if (adMode && ["PERSONAL", "PLATFORM"].includes(adMode)) {
+      client.adMode = adMode;
+    }
 
     if (req.user.role === ROLES.ADMIN) {
       // Assign to the admin who approved
@@ -105,7 +108,7 @@ export const getAdminClients = async (req, res, next) => {
 // Get clients assigned to the currently logged in Admin (Admin only)
 export const getMyClients = async (req, res, next) => {
   try {
-    const clients = await User.find({ role: ROLES.CLIENT, assignedAdmin: req.user._id }).select("name email role createdAt approvalStatus accessibleFeatures");
+    const clients = await User.find({ role: ROLES.CLIENT, assignedAdmin: req.user._id }).select("name email role createdAt approvalStatus accessibleFeatures adMode");
     successResponse(res, clients, "Your clients fetched successfully");
   } catch (err) {
     next(err);
@@ -116,7 +119,7 @@ export const getMyClients = async (req, res, next) => {
 export const updateClientFeatures = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { features } = req.body;
+    const { features, adMode } = req.body;
     
     // Ensure the client belongs to the admin (if not superadmin)
     const query = { _id: id, role: ROLES.CLIENT };
@@ -124,11 +127,16 @@ export const updateClientFeatures = async (req, res, next) => {
       query.assignedAdmin = req.user._id;
     }
 
+    const updatePayload = { accessibleFeatures: features };
+    if (adMode && ["PERSONAL", "PLATFORM"].includes(adMode)) {
+      updatePayload.adMode = adMode;
+    }
+
     const client = await User.findOneAndUpdate(
       query,
-      { accessibleFeatures: features },
+      updatePayload,
       { new: true, runValidators: true }
-    ).select("name email accessibleFeatures");
+    ).select("name email accessibleFeatures adMode");
 
     if (!client) {
       throw new AppError("Client not found or not assigned to you", 404);

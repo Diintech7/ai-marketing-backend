@@ -75,17 +75,15 @@ class ScraperService {
     
     // Generate the Google Dork query
     let dorkQuery = "";
-    if (platform === "gmb") dorkQuery = `"${keyword}" "${location}"`;
-    else if (platform === "facebook") dorkQuery = `site:facebook.com "${keyword}" "${location}" "+91"`;
-    else if (platform === "instagram") dorkQuery = `site:instagram.com "${keyword}" "${location}" "@gmail.com"`;
-    else if (platform === "linkedin") dorkQuery = `site:linkedin.com/company "${keyword}" "${location}"`;
-    else if (platform === "justdial") dorkQuery = `site:justdial.com "${keyword}" "${location}"`;
-    else if (platform === "indiamart") dorkQuery = `site:indiamart.com "${keyword}" "${location}"`;
-    else if (platform === "company-website") dorkQuery = `"${keyword}" "${location}" "contact us"`;
+    if (platform === "gmb") dorkQuery = `${keyword} ${location}`;
+    else if (platform === "justdial") dorkQuery = `site:justdial.com ${keyword} ${location}`;
+    else if (platform === "indiamart") dorkQuery = `site:indiamart.com ${keyword} ${location}`;
+    else if (platform === "tradeindia") dorkQuery = `site:tradeindia.com ${keyword} ${location}`;
+    else if (platform === "exportersindia") dorkQuery = `site:exportersindia.com ${keyword} ${location}`;
     else return [];
 
     // Create a fresh Incognito context for every platform to wipe cookies
-    const context = await browser.createIncognitoBrowserContext();
+    const context = await browser.createBrowserContext();
     const page = await context.newPage();
     
     // Randomize Viewport and User-Agent

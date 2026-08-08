@@ -15,6 +15,20 @@ export const login = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+export const generateApiKey = async (req, res, next) => {
+  try {
+    const data = await AuthService.generateApiKey(req.user.id);
+    successResponse(res, data, "API Key generated successfully");
+  } catch (err) { next(err); }
+};
+
+export const googleLogin = async (req, res, next) => {
+  try {
+    const data = await AuthService.googleLogin(req.body, res);
+    successResponse(res, data, "Google Login successful");
+  } catch (err) { next(err); }
+};
+
 export const logout = (req, res, next) => {
   try {
     const portal = req.query.portal || 'client';

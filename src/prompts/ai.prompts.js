@@ -184,6 +184,11 @@ Return JSON:
     return {
       systemPrompt: "You are an elite Digital Marketing AI. You analyze websites and create complete marketing campaigns. Return ONLY valid JSON.",
       prompt: `Analyze this business and generate a complete marketing campaign.
+
+CRITICAL INSTRUCTION:
+You MUST give the HIGHEST PRIORITY to the "User Description" when generating headlines, ad copy, and keywords. 
+The "Website Text" is ONLY for general background context. Do NOT generate generic ads based on the website if a specific User Description is provided. Your generated keywords and ad copy MUST directly reflect the exact offer, tone, and product mentioned in the User Description.
+
 Website Text: ${urlText}
 User Description: ${description}
 Budget: ${budget}

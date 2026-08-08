@@ -7,7 +7,7 @@ const adSetSchema = new mongoose.Schema({
     ageMin: { type: Number, default: 18 },
     ageMax: { type: Number, default: 65 },
     genders: [{ type: Number }], // 1=male, 2=female
-    locations: [{ city: String, country: String, region: String }],
+    locations: [{ city: String, country: String, region: String, radius: Number, lat: Number, lng: Number }],
     interests: [{ id: String, name: String }],
   },
   budget: { type: Number, required: true }, // in paise
@@ -36,6 +36,7 @@ const adSchema = new mongoose.Schema({
     videoHeadline: String,
   },
   imageUrl: { type: String, default: null },
+  thumbnailUrl: { type: String, default: null },
   link: { type: String, default: null },
   status: { type: String, enum: ["active", "paused", "deleted"], default: "paused" },
 });
@@ -44,10 +45,10 @@ const campaignSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     name: { type: String, required: true, trim: true },
+    businessName: { type: String, default: "Diin Tech" },
     platform: { type: String, enum: ["meta", "google", "both"], default: "meta" },
     objective: {
       type: String,
-      enum: ["AWARENESS", "TRAFFIC", "ENGAGEMENT", "LEADS", "APP_PROMOTION", "SALES"],
       default: "TRAFFIC",
     },
     status: {
@@ -55,13 +56,20 @@ const campaignSchema = new mongoose.Schema(
       enum: ["draft", "active", "paused", "completed", "deleted"],
       default: "draft",
     },
+    source: { type: String, enum: ["DASHBOARD", "EXTERNAL_API"], default: "DASHBOARD" },
+    apiPartnerId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    runMode: { type: String, enum: ["PERSONAL", "PLATFORM"], default: "PERSONAL" },
     publishError: { type: String, default: null },
+    pixelId: { type: String, default: null },
+    missingRequirements: [{ type: String }],
     // Meta
     metaCampaignId: { type: String, default: null },
     // Google
     googleCampaignId:  { type: String, default: null },
     googleAdGroupId:   { type: String, default: null },
-    googleAdType:      { type: String, enum: ["search", "display", "youtube"], default: "search" },
+    googleAdType:      { type: String, enum: ["search", "display", "youtube", "app"], default: "search" },
+    appId:             { type: String, default: null },
+    appStore:          { type: String, enum: ["GOOGLE_APP_STORE", "APPLE_APP_STORE"], default: "GOOGLE_APP_STORE" },
     budget: { type: Number, required: true },
     budgetType: { type: String, enum: ["daily", "weekly", "monthly", "lifetime"], default: "daily" },
     startDate: { type: Date, default: null },

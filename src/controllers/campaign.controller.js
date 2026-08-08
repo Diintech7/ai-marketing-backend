@@ -81,7 +81,7 @@ export const uploadImage = async (req, res, next) => {
     const b64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
     const result = await getCloudinary().uploader.upload(b64, {
       folder: `ai-marketing/${req.user._id}/uploads`,
-      resource_type: "image",
+      resource_type: "auto",
     });
     successResponse(res, { url: result.secure_url, publicId: result.public_id }, "Image uploaded");
   } catch (err) { next(err); }

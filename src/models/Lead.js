@@ -6,12 +6,28 @@ const leadSchema = new mongoose.Schema(
     category: { type: String, trim: true },
     phoneNumbers: [{ type: String, trim: true }],
     emails: [{ type: String, trim: true, lowercase: true }],
+    website: { type: String, trim: true },
+    
+    // Location Details
     address: { type: String, trim: true },
     city: { type: String, trim: true },
+    state: { type: String, trim: true },
+    country: { type: String, default: "India", trim: true },
     pincode: { type: String, trim: true },
+    latitude: { type: Number },
+    longitude: { type: Number },
+    gridId: { type: String, trim: true }, // Which cell it was scraped from
+
+    // Extra Details
     rating: { type: String, default: null },
-    website: { type: String, trim: true },
+    reviewsCount: { type: Number, default: 0 },
+    openingHours: { type: String, trim: true },
+    googleMapsUrl: { type: String, trim: true },
+    sourceUrl: { type: String, trim: true },
+    socialLinks: [{ type: String, trim: true }],
+    scrapedAt: { type: Date, default: Date.now },
     sources: [{ type: String, trim: true }], // e.g., 'google', 'justdial'
+
     description: { type: String, trim: true },
     pitchSuggestion: { type: String, trim: true },
     leadQuality: { type: String, enum: ["Hot", "Warm", "Cold", "Unknown"], default: "Unknown" },

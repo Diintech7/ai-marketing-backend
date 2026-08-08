@@ -47,6 +47,15 @@ const userSchema = new mongoose.Schema(
       default: ["campaigns", "email_marketing", "ai_agent", "tools", "leads", "analytics"] 
     },
 
+    // Dual-Mode Ad Settings
+    adMode: { type: String, enum: ["PERSONAL", "PLATFORM"], default: "PERSONAL" },
+    walletBalance: { type: Number, default: 0 },
+    apiKeys: [{ type: String }],
+    
+    // Auth Providers
+    authProvider: { type: String, enum: ["local", "google"], default: "local" },
+    googleId: { type: String },
+
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

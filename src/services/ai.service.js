@@ -39,6 +39,23 @@ const AIService = {
     return parseJSON(result);
   },
 
+  parseGridTask: async (userPrompt) => {
+    const systemPrompt = `You are an AI that parses natural language lead generation tasks into a strict JSON format. 
+Extract the business category, city, state (if applicable), and platforms to scrape.
+CRITICAL: If the user provides a PIN code or a range of PIN codes (e.g., "110001 to 110010" or "110001, 110005"), you MUST expand them into a complete array of all individual PIN codes in that range.
+
+Return ONLY valid JSON:
+{
+  "category": "e.g., Medical Store",
+  "city": "e.g., Delhi",
+  "state": "e.g., Delhi",
+  "pincodes": ["110001", "110002", "110003"], // The expanded array of strings
+  "platforms": ["googleMaps", "justdial"] // Infer from prompt or default to all if unspecified
+}`;
+    const result = await aiProvider.complete(userPrompt, { systemPrompt, maxTokens: 800 });
+    return parseJSON(result);
+  },
+
   generateSEOTitle: async (input) => {
     const { systemPrompt, prompt } = prompts.seoTitle(input);
     const result = await aiProvider.complete(prompt, { systemPrompt });
@@ -114,6 +131,49 @@ const AIService = {
     }
 
     return parsedData;
+  },
+
+  analyzePerformance: async (input) => {
+    const systemPrompt = `You are an expert digital marketing AI analyst. 
+Given the following campaign metrics (spend, impressions, clicks, ctr, cpc, budget, objective, status), analyze the health of the campaign.
+Return ONLY valid JSON in the exact following format:
+{
+  "healthScore": 85,
+  "analysis": "A short 1-2 sentence overall analysis.",
+  "recommendations": [
+    "A specific, actionable recommendation to improve CTR or CPC.",
+    "Another recommendation about budget or targeting.",
+    "A third recommendation."
+  ]
+}`;
+    const userPrompt = `Campaign Metrics:\n${JSON.stringify(input, null, 2)}`;
+    const result = await aiProvider.complete(userPrompt, { systemPrompt, maxTokens: 800 });
+    return parseJSON(result);
+  },
+
+  analyzeCampaignSetup: async (input) => {
+    const systemPrompt = `You are an expert digital marketing AI.
+Analyze the following ad campaign setup data in real-time.
+Provide a health score (0-100), a checklist of 4-5 items (whether they passed or failed based on best practices), 2-3 short actionable suggestions, and an 'optimizations' object containing the recommended budget and radius.
+Return ONLY valid JSON in this exact format:
+{
+  "score": 85,
+  "checklist": [
+    { "text": "Content optimized for target audiences", "passed": true },
+    { "text": "High visual aesthetics checked", "passed": false }
+  ],
+  "suggestions": [
+    "Increase budget to ₹1500 for better reach.",
+    "Add more specific interests to narrow down the audience."
+  ],
+  "optimizations": {
+    "budget": "1500",
+    "radius": 15
+  }
+}`;
+    const userPrompt = `Campaign Setup Data:\n${JSON.stringify(input, null, 2)}`;
+    const result = await aiProvider.complete(userPrompt, { systemPrompt, maxTokens: 800 });
+    return parseJSON(result);
   },
 };
 

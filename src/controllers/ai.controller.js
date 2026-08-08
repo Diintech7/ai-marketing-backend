@@ -21,10 +21,25 @@ export const generateCaptions = handler((body) => AIService.generateCaptions(bod
 export const generateCTA = handler((body) => AIService.generateCTA(body));
 export const generateCampaignSuggestion = handler((body) => AIService.generateCampaignSuggestion(body));
 export const generateMagicCampaign = handler((body, user) => AIService.generateMagicCampaign(body, user._id));
+export const analyzePerformance = handler((body) => AIService.analyzePerformance(body));
+export const analyzeCampaignSetup = handler((body) => AIService.analyzeCampaignSetup(body));
 
 export const generateImage = async (req, res, next) => {
   try {
     const result = await ImageService.generate({ ...req.body, userId: req.user._id });
     successResponse(res, result, "Image generated");
   } catch (err) { next(err); }
+};
+
+export const parseGridTask = async (req, res, next) => {
+  try {
+    const { prompt } = req.body;
+    if (!prompt) {
+      return res.status(400).json({ success: false, message: "Prompt is required" });
+    }
+    const result = await AIService.parseGridTask(prompt);
+    res.status(200).json({ success: true, data: result });
+  } catch (err) { 
+    next(err); 
+  }
 };

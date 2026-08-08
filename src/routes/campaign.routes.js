@@ -5,7 +5,7 @@ import { createCampaignValidator, updateBudgetValidator } from "../validators/ca
 import * as ctrl from "../controllers/campaign.controller.js";
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 router.use(protect);
 

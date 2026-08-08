@@ -5,17 +5,27 @@ import AppError from "../utils/AppError.js";
 import { PLAN_LIMITS } from "../constants/index.js";
 
 const getMetaCreds = (user) => {
-  const accessToken = user.metaAccessToken || process.env.META_ACCESS_TOKEN;
-  const adAccountId = user.metaAdAccountId || process.env.META_AD_ACCOUNT_ID;
+  if (user.adMode === "PLATFORM") {
+    if (!process.env.META_ACCESS_TOKEN || !process.env.META_AD_ACCOUNT_ID)
+      throw new AppError("Platform Meta credentials are not configured", 500);
+    return { accessToken: process.env.META_ACCESS_TOKEN, adAccountId: process.env.META_AD_ACCOUNT_ID };
+  }
+  const accessToken = user.metaAccessToken;
+  const adAccountId = user.metaAdAccountId;
   if (!accessToken || !adAccountId)
-    throw new AppError("Please connect your Meta account in Settings first or configure .env", 400);
+    throw new AppError("Please connect your Meta account in Settings first", 400);
   return { accessToken, adAccountId };
 };
 
 const getGoogleCreds = (user) => {
-  const customerId     = user.googleAdsCustomerId     || process.env.GOOGLE_CUSTOMER_ID;
-  const refreshToken   = user.googleAdsRefreshToken   || process.env.GOOGLE_REFRESH_TOKEN;
-  const developerToken = user.googleAdsDeveloperToken || process.env.GOOGLE_DEVELOPER_TOKEN;
+  if (user.adMode === "PLATFORM") {
+    if (!process.env.GOOGLE_CUSTOMER_ID || !process.env.GOOGLE_REFRESH_TOKEN || !process.env.GOOGLE_DEVELOPER_TOKEN)
+      throw new AppError("Platform Google credentials are not configured", 500);
+    return { customerId: process.env.GOOGLE_CUSTOMER_ID, refreshToken: process.env.GOOGLE_REFRESH_TOKEN, developerToken: process.env.GOOGLE_DEVELOPER_TOKEN };
+  }
+  const customerId     = user.googleAdsCustomerId;
+  const refreshToken   = user.googleAdsRefreshToken;
+  const developerToken = user.googleAdsDeveloperToken;
   if (!customerId || !refreshToken || !developerToken)
     throw new AppError("Please connect your Google Ads account in Settings first", 400);
   return { customerId, refreshToken, developerToken };
@@ -59,7 +69,39 @@ const CampaignService = {
     const campaign = await campaignRepo.findByUserAndId(user._id, campaignId);
     if (!campaign) throw new AppError("Campaign not found", 404);
 
-    const updates = { status: "active" };
+    // Wallet Check for PLATFORM mode
+    if (user.adMode === "PLATFORM") {
+      if (user.walletBalance < campaign.budget) {
+        throw new AppError("Insufficient wallet balance to run this campaign. Please recharge.", 402);
+      }
+      // Deduct 1 day budget as initial charge
+      user.walletBalance -= campaign.budget;
+      if (typeof user.save === "function") {
+        await user.save();
+      } else {
+        const User = (await import("../models/User.js")).default;
+        await User.updateOne({ _id: user._id }, { $inc: { walletBalance: -campaign.budget } });
+      }
+    }
+
+    // ── Pre-flight Validation ──
+    const missing = [];
+    const obj = campaign.objective || "TRAFFIC";
+    if (obj === "CONVERSIONS" || obj === "SALES" || obj === "APP_PROMOTION") {
+      if (!campaign.pixelId) missing.push("Conversions/Sales objective requires a Facebook Pixel ID.");
+    }
+    
+    if (missing.length > 0) {
+      campaign.missingRequirements = missing;
+      campaign.status = "draft";
+      campaign.publishError = "Pre-flight validation failed. See missing requirements.";
+      await campaign.save();
+      throw new AppError("Campaign has missing requirements. Check the dashboard for details.", 400);
+    } else {
+      campaign.missingRequirements = [];
+    }
+
+    const updates = { status: "active", runMode: user.adMode || "PERSONAL", missingRequirements: [] };
     const platform = campaign.platform || "meta";
 
     // ── Meta ──
@@ -88,6 +130,9 @@ const CampaignService = {
               metaCampaignId: updates.metaCampaignId || campaign.metaCampaignId,
               startDate: campaign.startDate,
               endDate:   campaign.endDate,
+              objective: campaign.objective,
+              pixelId:   campaign.pixelId,
+              pageId:    process.env.META_PAGE_ID,
             });
             adSet.metaAdSetId = ms.id;
             await campaign.save(); // Incremental save
@@ -101,11 +146,26 @@ const CampaignService = {
             if (ad.metaAdId) continue; // Skip if already created
 
             let imageHash = null;
+            let videoId = null;
+            let finalThumbnailUrl = ad.thumbnailUrl;
+            
             if (ad.imageUrl) {
+              const isVideo = ad.imageUrl.endsWith(".mp4") || ad.imageUrl.includes("/video/upload/");
+              
+              if (isVideo && !finalThumbnailUrl) {
+                // Smart Cloudinary Fallback to auto-generate thumbnail from the first frame
+                finalThumbnailUrl = ad.imageUrl.replace('.mp4', '.jpg').replace('/video/upload/', '/image/upload/');
+              }
               try {
-                imageHash = await MetaService.uploadImage(accessToken, adAccountId, ad.imageUrl);
+                if (isVideo) {
+                  videoId = await MetaService.uploadVideo(accessToken, adAccountId, ad.imageUrl);
+                  if (!videoId) throw new Error("Meta API did not return a Video ID");
+                } else {
+                  imageHash = await MetaService.uploadImage(accessToken, adAccountId, ad.imageUrl);
+                }
               } catch (err) {
-                console.warn("[Meta Fallback] Image upload failed, using picture URL directly", err.message);
+                console.warn("[Meta Fallback] Media upload failed", err.message);
+                if (isVideo) throw new Error(`Video upload to Meta failed: ${err.message}`);
               }
             }
 
@@ -114,7 +174,9 @@ const CampaignService = {
               pageId: process.env.META_PAGE_ID,
               adCopy: ad.metaAdCopy || ad.adCopy,
               imageHash,
+              videoId,
               imageUrl: ad.imageUrl,
+              thumbnailUrl: finalThumbnailUrl,
               link: ad.link || campaign.link || "https://www.example.com"
             });
 
@@ -146,6 +208,12 @@ const CampaignService = {
       if (!campaign.googleCampaignId) {
         const gcId = await GoogleAdsService.createCampaign(creds, campaign);
         updates.googleCampaignId = gcId;
+        
+        // Add Campaign Criteria (Location & Language)
+        if (campaign.adSets && campaign.adSets.length > 0 && campaign.adSets[0].targeting?.locations?.length > 0) {
+          const loc = campaign.adSets[0].targeting.locations[0];
+          await GoogleAdsService.setCampaignCriteria(creds, gcId, loc);
+        }
         const agId = await GoogleAdsService.createAdGroup(creds, gcId, campaign);
         updates.googleAdGroupId = agId;
         
@@ -157,7 +225,7 @@ const CampaignService = {
         // Create ads from campaign.ads
         for (const ad of campaign.ads) {
           const finalUrl = ad.link || campaign.link || "https://www.example.com";
-          await GoogleAdsService.createAd(creds, agId, ad.googleAdCopy || ad.adCopy, campaign.googleAdType, finalUrl, ad.imageUrl);
+          await GoogleAdsService.createAd(creds, agId, ad.googleAdCopy || ad.adCopy, campaign.googleAdType, finalUrl, ad.imageUrl, campaign.businessName);
         }
       } else {
         await GoogleAdsService.enableCampaign(creds, campaign.googleCampaignId);

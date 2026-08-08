@@ -58,7 +58,59 @@ const AuthService = {
 
     return {
       accessToken,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role, plan: user.plan, credits: user.credits, accessibleFeatures: user.accessibleFeatures },
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, plan: user.plan, credits: user.credits, accessibleFeatures: user.accessibleFeatures, walletBalance: user.walletBalance, adMode: user.adMode, apiKeys: user.apiKeys },
+    };
+  },
+
+  googleLogin: async ({ token, portal }, res) => {
+    // Verify token with Google
+    const axios = (await import("axios")).default;
+    let userInfo;
+    try {
+      const { data } = await axios.get("https://www.googleapis.com/oauth2/v3/userinfo", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      userInfo = data;
+    } catch (err) {
+      throw new AppError("Invalid Google token", 401);
+    }
+
+    let user = await AuthRepository.findByEmail(userInfo.email);
+    if (!user) {
+      // Auto register for Google users
+      user = await AuthRepository.create({
+        name: userInfo.name,
+        email: userInfo.email,
+        password: crypto.randomBytes(16).toString("hex"), // Dummy password
+        isEmailVerified: true,
+        authProvider: "google",
+        googleId: userInfo.sub,
+        avatar: userInfo.picture,
+      });
+    }
+
+    if (portal) {
+      if (portal === 'superadmin' && user.role !== ROLES.SUPERADMIN) throw new AppError("Access denied.", 403);
+      if (portal === 'admin' && user.role !== ROLES.ADMIN) throw new AppError("Access denied.", 403);
+      if (portal === 'client' && (user.role === ROLES.ADMIN || user.role === ROLES.SUPERADMIN)) throw new AppError("Admins must login through admin portal.", 403);
+    }
+
+    if (user.role === "client" && user.approvalStatus === "pending") {
+      throw new AppError("Your account is pending admin approval.", 403);
+    }
+    if (user.role === "client" && user.approvalStatus === "rejected") {
+      throw new AppError("Your account registration was rejected.", 403);
+    }
+
+    const accessToken = generateAccessToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
+
+    const cookieName = portal ? `${portal}_refreshToken` : "client_refreshToken";
+    res.cookie(cookieName, refreshToken, COOKIE_OPTIONS);
+
+    return {
+      accessToken,
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, plan: user.plan, credits: user.credits, accessibleFeatures: user.accessibleFeatures, walletBalance: user.walletBalance, adMode: user.adMode, apiKeys: user.apiKeys },
     };
   },
 
