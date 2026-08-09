@@ -1,7 +1,7 @@
 import User from "../models/User.js";
 import AppError from "../utils/AppError.js";
 import { successResponse } from "../utils/apiResponse.js";
-import { ROLES } from "../constants/index.js";
+import { ROLES, PLANS, PLAN_CREDITS } from "../constants/index.js";
 
 // Fetch all pending clients
 export const getPendingClients = async (req, res, next) => {
@@ -108,7 +108,7 @@ export const getAdminClients = async (req, res, next) => {
 // Get clients assigned to the currently logged in Admin (Admin only)
 export const getMyClients = async (req, res, next) => {
   try {
-    const clients = await User.find({ role: ROLES.CLIENT, assignedAdmin: req.user._id }).select("name email role createdAt approvalStatus accessibleFeatures adMode walletBalance");
+    const clients = await User.find({ role: ROLES.CLIENT, assignedAdmin: req.user._id }).select("name email role createdAt approvalStatus accessibleFeatures adMode walletBalance plan");
     successResponse(res, clients, "Your clients fetched successfully");
   } catch (err) {
     next(err);
@@ -119,7 +119,7 @@ export const getMyClients = async (req, res, next) => {
 export const updateClientFeatures = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { features, adMode } = req.body;
+    const { features, adMode, plan } = req.body;
     
     // Ensure the client belongs to the admin (if not superadmin)
     const query = { _id: id, role: ROLES.CLIENT };
@@ -131,12 +131,16 @@ export const updateClientFeatures = async (req, res, next) => {
     if (adMode && ["PERSONAL", "PLATFORM"].includes(adMode)) {
       updatePayload.adMode = adMode;
     }
+    if (plan && Object.values(PLANS).includes(plan)) {
+      updatePayload.plan = plan;
+      updatePayload.credits = PLAN_CREDITS[plan]; // Auto-allocate plan credits
+    }
 
     const client = await User.findOneAndUpdate(
       query,
       updatePayload,
       { new: true, runValidators: true }
-    ).select("name email accessibleFeatures adMode");
+    ).select("name email accessibleFeatures adMode plan credits");
 
     if (!client) {
       throw new AppError("Client not found or not assigned to you", 404);
