@@ -29,5 +29,6 @@ router.get("/admins/:id/clients", restrictTo(ROLES.SUPERADMIN), adminController.
 // ----------------------------------------------------
 router.get("/my-clients", restrictTo(ROLES.ADMIN, ROLES.SUPERADMIN), adminController.getMyClients);
 router.put("/clients/:id/features", restrictTo(ROLES.ADMIN, ROLES.SUPERADMIN), adminController.updateClientFeatures);
+router.post("/clients/:id/recharge", restrictTo(ROLES.ADMIN, ROLES.SUPERADMIN), adminController.rechargeClientWallet);
 
 export default router;

@@ -108,7 +108,7 @@ export const getAdminClients = async (req, res, next) => {
 // Get clients assigned to the currently logged in Admin (Admin only)
 export const getMyClients = async (req, res, next) => {
   try {
-    const clients = await User.find({ role: ROLES.CLIENT, assignedAdmin: req.user._id }).select("name email role createdAt approvalStatus accessibleFeatures adMode");
+    const clients = await User.find({ role: ROLES.CLIENT, assignedAdmin: req.user._id }).select("name email role createdAt approvalStatus accessibleFeatures adMode walletBalance");
     successResponse(res, clients, "Your clients fetched successfully");
   } catch (err) {
     next(err);
@@ -143,6 +143,38 @@ export const updateClientFeatures = async (req, res, next) => {
     }
 
     successResponse(res, client, "Client features updated successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Recharge a client's wallet balance
+export const rechargeClientWallet = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { amount } = req.body;
+
+    const parsedAmount = Number(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      throw new AppError("Invalid recharge amount. Must be greater than 0.", 400);
+    }
+
+    const client = await User.findById(id);
+    if (!client) throw new AppError("Client not found", 404);
+    if (client.role !== ROLES.CLIENT) {
+      throw new AppError("Only client wallets can be recharged", 400);
+    }
+
+    // Access control check: logged-in user must be superadmin OR the client's assignedAdmin
+    if (req.user.role !== ROLES.SUPERADMIN && client.assignedAdmin?.toString() !== req.user._id.toString()) {
+      throw new AppError("You are not authorized to recharge this client's wallet", 403);
+    }
+
+    // Add balance to user
+    client.walletBalance = (client.walletBalance || 0) + parsedAmount;
+    await client.save();
+
+    successResponse(res, { walletBalance: client.walletBalance }, `Successfully added ₹${parsedAmount} to client's wallet`);
   } catch (err) {
     next(err);
   }
