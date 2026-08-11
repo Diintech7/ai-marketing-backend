@@ -3,6 +3,7 @@ import MetaService from "./meta.service.js";
 import GoogleAdsService from "./google.service.js";
 import AppError from "../utils/AppError.js";
 import { PLAN_LIMITS } from "../constants/index.js";
+import WebhookService from "./webhook.service.js";
 
 const getMetaCreds = (user) => {
   if (user.adMode === "PLATFORM") {
@@ -300,7 +301,12 @@ const CampaignService = {
       }
     }
 
-    return campaignRepo.updateById(campaignId, updates);
+    const updatedCampaign = await campaignRepo.updateById(campaignId, updates);
+
+    // Fire webhook notification (non-blocking)
+    WebhookService.send(user, updatedCampaign || campaign, "campaign.status_changed", "active").catch(() => {});
+
+    return updatedCampaign;
   },
 
   // ─── Pause ──────────────────────────────────────────────────
@@ -317,7 +323,9 @@ const CampaignService = {
       const creds = getGoogleCreds(user);
       await GoogleAdsService.pauseCampaign(creds, campaign.googleCampaignId);
     }
-    return campaignRepo.updateById(campaignId, { status: "paused" });
+    const paused = await campaignRepo.updateById(campaignId, { status: "paused" });
+    WebhookService.send(user, paused || campaign, "campaign.status_changed", "paused").catch(() => {});
+    return paused;
   },
 
   // ─── Resume ─────────────────────────────────────────────────

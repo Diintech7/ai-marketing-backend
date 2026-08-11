@@ -51,6 +51,7 @@ const userSchema = new mongoose.Schema(
     adMode: { type: String, enum: ["PERSONAL", "PLATFORM"], default: "PERSONAL" },
     walletBalance: { type: Number, default: 0 },
     apiKeys: [{ type: String }],
+    webhookUrl: { type: String, default: null }, // URL to notify on campaign status change
     
     // Auth Providers
     authProvider: { type: String, enum: ["local", "google"], default: "local" },
