@@ -98,7 +98,7 @@ export const getAdmins = async (req, res, next) => {
 export const getAdminClients = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const clients = await User.find({ role: ROLES.CLIENT, assignedAdmin: id }).select("name email role createdAt approvalStatus");
+    const clients = await User.find({ role: ROLES.CLIENT, assignedAdmin: id }).select("name email role createdAt approvalStatus apiKeys webhookUrl");
     successResponse(res, clients, "Admin clients fetched successfully");
   } catch (err) {
     next(err);
@@ -108,7 +108,7 @@ export const getAdminClients = async (req, res, next) => {
 // Get clients assigned to the currently logged in Admin (Admin only)
 export const getMyClients = async (req, res, next) => {
   try {
-    const clients = await User.find({ role: ROLES.CLIENT, assignedAdmin: req.user._id }).select("name email role createdAt approvalStatus accessibleFeatures adMode walletBalance plan");
+    const clients = await User.find({ role: ROLES.CLIENT, assignedAdmin: req.user._id }).select("name email role createdAt approvalStatus accessibleFeatures adMode walletBalance plan apiKeys webhookUrl");
     successResponse(res, clients, "Your clients fetched successfully");
   } catch (err) {
     next(err);
