@@ -64,6 +64,8 @@ const CHANNEL_MAP = {
   display: "DISPLAY",
   youtube: "VIDEO",
   app: "MULTI_CHANNEL",
+  pmax: "PERFORMANCE_MAX",
+  demand_gen: "DEMAND_GEN",
 };
 
 const cleanText = (text, maxLength) => {
@@ -138,6 +140,43 @@ const GoogleAdsService = {
       });
       const budgetId = budgetRes.data.results[0].resourceName;
 
+      // Dynamic Bidding Strategy selection based on objective and type
+      let biddingStrategy = {};
+      if (campaign.googleAdType === "app") {
+        biddingStrategy = {
+          advertisingChannelSubType: "APP_CAMPAIGN",
+          appCampaignSetting: {
+            biddingStrategyGoalType: "OPTIMIZE_INSTALLS_TARGET_INSTALL_COST",
+            appId: campaign.appId,
+            appStore: campaign.appStore || "GOOGLE_APP_STORE"
+          },
+          targetCpa: { targetCpaMicros: Math.round(effectiveDailyBudget * 1_000_000 / 10) },
+        };
+      } else {
+        const obj = campaign.objective || "TRAFFIC";
+        if (["pmax"].includes(campaign.googleAdType)) {
+          biddingStrategy = { maximizeConversions: {} }; // PMax only supports this
+        } else if (obj === "TRAFFIC") {
+          biddingStrategy = { maximizeClicks: {} };
+        } else if (obj === "AWARENESS") {
+          biddingStrategy = { manualCpm: {} };
+        } else {
+          biddingStrategy = { maximizeConversions: {} }; // Sales / Leads
+        }
+      }
+
+      let startDateTimeStr = null;
+      if (campaign.startDate) {
+        const datePart = new Date(campaign.startDate).toISOString().slice(0, 10);
+        startDateTimeStr = `${datePart} 00:00:00`;
+      }
+
+      let endDateTimeStr = null;
+      if (campaign.endDate) {
+        const datePart = new Date(campaign.endDate).toISOString().slice(0, 10);
+        endDateTimeStr = `${datePart} 23:59:59`;
+      }
+
       const campRes = await api.post("/campaigns:mutate", {
         operations: [{
           create: {
@@ -145,20 +184,11 @@ const GoogleAdsService = {
             status: "PAUSED",
             advertisingChannelType: CHANNEL_MAP[campaign.googleAdType] || "SEARCH",
             campaignBudget: budgetId,
-            ...(campaign.googleAdType === "app" ? {
-              advertisingChannelSubType: "APP_CAMPAIGN",
-              appCampaignSetting: {
-                biddingStrategyGoalType: "OPTIMIZE_INSTALLS_TARGET_INSTALL_COST",
-                appId: campaign.appId,
-                appStore: campaign.appStore || "GOOGLE_APP_STORE"
-              },
-              targetCpa: { targetCpaMicros: effectiveDailyBudget * 1_000_000 / 10 },
-            } : {
-              maximizeConversions: {},
-            }),
+            ...biddingStrategy,
             containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
-            ...(campaign.startDate && { startDateTime: new Date(campaign.startDate).toISOString().slice(0, 10) + " 00:00:00" }),
-            ...(campaign.endDate && { endDateTime: new Date(campaign.endDate).toISOString().slice(0, 10) + " 23:59:59" }),
+            ...(campaign.googleAdType === "pmax" && { brandGuidelinesEnabled: false }),
+            ...(startDateTimeStr && { startDateTime: startDateTimeStr }),
+            ...(endDateTimeStr && { endDateTime: endDateTimeStr }),
           },
         }],
       });
@@ -166,13 +196,12 @@ const GoogleAdsService = {
     } catch (err) { handleError(err); }
   },
 
-  setCampaignCriteria: async (creds, campaignResourceName, location, languageConstants = ["languageConstants/1000", "languageConstants/1023"]) => {
+  setCampaignCriteria: async (creds, campaignResourceName, location, campaign = null, languageConstants = ["languageConstants/1000", "languageConstants/1023"]) => {
     try {
       const token = await getAccessToken(creds.refreshToken);
       const api = client(token, creds.developerToken, creds.customerId);
       const operations = [];
 
-      // Language Criteria
       for (const lang of languageConstants) {
         operations.push({
           create: {
@@ -182,7 +211,6 @@ const GoogleAdsService = {
         });
       }
 
-      // Location Proximity Criterion
       if (location && location.lat && location.lng && location.radius) {
         operations.push({
           create: {
@@ -199,6 +227,45 @@ const GoogleAdsService = {
         });
       }
 
+      if (campaign && campaign.scheduleDays && campaign.scheduleDays.length > 0) {
+        let startHour = 0;
+        let startMinute = "ZERO";
+        if (campaign.startTime) {
+          const parts = campaign.startTime.split(":");
+          startHour = parseInt(parts[0]) || 0;
+          const mins = parseInt(parts[1]) || 0;
+          if (mins >= 45) startMinute = "FORTY_FIVE";
+          else if (mins >= 30) startMinute = "THIRTY";
+          else if (mins >= 15) startMinute = "FIFTEEN";
+        }
+
+        let endHour = 24;
+        let endMinute = "ZERO";
+        if (campaign.endTime) {
+          const parts = campaign.endTime.split(":");
+          endHour = parseInt(parts[0]) || 24;
+          const mins = parseInt(parts[1]) || 0;
+          if (mins >= 45) endMinute = "FORTY_FIVE";
+          else if (mins >= 30) endMinute = "THIRTY";
+          else if (mins >= 15) endMinute = "FIFTEEN";
+        }
+
+        for (const day of campaign.scheduleDays) {
+          operations.push({
+            create: {
+              campaign: campaignResourceName,
+              adSchedule: {
+                dayOfWeek: day.toUpperCase(),
+                startHour,
+                startMinute,
+                endHour,
+                endMinute
+              }
+            }
+          });
+        }
+      }
+
       if (operations.length > 0) {
         await api.post("/campaignCriteria:mutate", { operations });
       }
@@ -211,18 +278,133 @@ const GoogleAdsService = {
     try {
       const token = await getAccessToken(creds.refreshToken);
       const api = client(token, creds.developerToken, creds.customerId);
+      const isCpm = campaign.objective === "AWARENESS";
+      const adGroupData = {
+        name: `${campaign.name} - Ad Group`,
+        campaign: campaignResourceName,
+        status: "ENABLED",
+      };
+
+      if (isCpm) {
+        adGroupData.cpmBidMicros = 1000000; // 1 INR CPM bid for Awareness campaigns
+      } else {
+        adGroupData.cpcBidMicros = 1000000; // 1 INR CPC bid for Clicks/Conversion campaigns
+      }
+
       const res = await api.post("/adGroups:mutate", {
         operations: [{
-          create: {
-            name: `${campaign.name} - Ad Group`,
-            campaign: campaignResourceName,
-            status: "ENABLED",
-            cpcBidMicros: 1_000_000,
-          },
+          create: adGroupData,
         }],
       });
       return res.data.results[0].resourceName;
     } catch (err) { handleError(err); }
+  },
+
+  createPmaxAssetGroup: async (creds, campaignResourceName, campaign, googleAdCopy, imageUrls, logoUrl, businessName, finalUrl) => {
+    try {
+      const token = await getAccessToken(creds.refreshToken);
+      const api = client(token, creds.developerToken, creds.customerId);
+      
+      let targetFinalUrl = finalUrl;
+      if (targetFinalUrl && targetFinalUrl.startsWith("tel:")) {
+        targetFinalUrl = "https://diintech.com"; // Fallback landing page for protocol validation
+      }
+
+      // 1. Create ALL Text Assets first to get their real Resource Names
+      const headlines = googleAdCopy.headlines && googleAdCopy.headlines.length >= 3 
+        ? googleAdCopy.headlines.slice(0, 5)
+        : [googleAdCopy.headline || "Special Offer", "Learn More Today", "Contact Us Now"].slice(0, 5);
+      
+      const descriptions = googleAdCopy.descriptions && googleAdCopy.descriptions.length >= 2
+        ? googleAdCopy.descriptions.slice(0, 4)
+        : [googleAdCopy.primaryText || googleAdCopy.description || "Discover our amazing services", "Contact us today for more information."].slice(0, 4);
+
+      const longHeadline = googleAdCopy.primaryText || googleAdCopy.description || "Discover our amazing services today";
+
+      const textAssetsToCreate = [
+        ...headlines.map(text => ({ type: "TEXT", textAsset: { text: cleanText(text, 30) } })),
+        ...descriptions.map(text => ({ type: "TEXT", textAsset: { text: cleanText(text, 90) } })),
+        { type: "TEXT", textAsset: { text: cleanText(longHeadline, 90) } },
+        { type: "TEXT", textAsset: { text: cleanText(businessName || "Diin Tech", 25) } }
+      ];
+
+      const textRes = await api.post("/assets:mutate", {
+        operations: textAssetsToCreate.map(asset => ({ create: asset }))
+      });
+      
+      const textResourceNames = textRes.data.results.map(r => r.resourceName);
+      let tIdx = 0;
+      const headlineResNames = headlines.map(() => textResourceNames[tIdx++]);
+      const descResNames = descriptions.map(() => textResourceNames[tIdx++]);
+      const longHeadlineResName = textResourceNames[tIdx++];
+      const businessNameResName = textResourceNames[tIdx++];
+
+      // 2. Create ALL Image Assets
+      const uniqueImages = [...new Set(imageUrls)].filter(Boolean);
+      let marketingImageRes = null;
+      let squareImageRes = null;
+      
+      if (uniqueImages.length > 0) {
+        marketingImageRes = await GoogleAdsService.uploadImageAsset(creds, uniqueImages[0], "landscape");
+        squareImageRes = await GoogleAdsService.uploadImageAsset(creds, uniqueImages[0], "square");
+      }
+      
+      let logoRes = null;
+      if (logoUrl) {
+        logoRes = await GoogleAdsService.uploadImageAsset(creds, logoUrl, "square");
+      } else if (uniqueImages.length > 0) {
+        logoRes = squareImageRes; // Fallback to square image if no logo is provided
+      }
+
+      // 3. Batch Mutate to create AssetGroup AND link AssetGroupAssets SIMULTANEOUSLY
+      const mutateOperations = [];
+      const tempAssetGroupId = `customers/${creds.customerId}/assetGroups/-1`;
+
+      mutateOperations.push({
+        assetGroupOperation: {
+          create: {
+            resourceName: tempAssetGroupId,
+            name: `${campaign.name} - Asset Group ${Date.now()}`,
+            campaign: campaignResourceName,
+            status: "ENABLED",
+            finalUrls: [targetFinalUrl]
+          }
+        }
+      });
+
+      const addLink = (assetResourceName, fieldType) => {
+        if (assetResourceName) {
+          mutateOperations.push({
+            assetGroupAssetOperation: {
+              create: {
+                assetGroup: tempAssetGroupId,
+                asset: assetResourceName,
+                fieldType: fieldType
+              }
+            }
+          });
+        }
+      };
+
+      headlineResNames.forEach(res => addLink(res, "HEADLINE"));
+      descResNames.forEach(res => addLink(res, "DESCRIPTION"));
+      addLink(longHeadlineResName, "LONG_HEADLINE");
+      addLink(businessNameResName, "BUSINESS_NAME");
+      addLink(marketingImageRes, "MARKETING_IMAGE");
+      addLink(squareImageRes, "SQUARE_MARKETING_IMAGE");
+      addLink(logoRes, "LOGO");
+
+      const batchRes = await api.post("/googleAds:mutate", { mutateOperations });
+      
+      console.log(`[Google Ads] Successfully created Asset Group for PMax via Bulk Mutate`);
+      
+      // Find the real resource name from the batch response
+      const assetGroupResponse = batchRes.data.mutateOperationResponses.find(r => r.assetGroupResult);
+      return assetGroupResponse ? assetGroupResponse.assetGroupResult.resourceName : null;
+    } catch (err) {
+      console.error("[Google Ads] PMax Asset Group error:", JSON.stringify(err.response?.data, null, 2) || err.message);
+      throw err;
+    }
   },
 
   addKeywordsToAdGroup: async (creds, adGroupResourceName, keywords) => {
@@ -278,19 +460,30 @@ const GoogleAdsService = {
     }
   },
 
-  createAd: async (creds, adGroupResourceName, googleAdCopy, adType = "search", finalUrl = "https://www.example.com", imageUrl = null, businessName = "Diin Tech") => {
+  createAd: async (creds, adGroupResourceName, googleAdCopy, adType = "search", finalUrl = "https://www.example.com", imageUrl = null, businessName = "Diin Tech", videoUrl = null, imageUrls = []) => {
     try {
       const token = await getAccessToken(creds.refreshToken);
       const api = client(token, creds.developerToken, creds.customerId);
 
+      let targetFinalUrl = finalUrl;
+      if (targetFinalUrl && targetFinalUrl.startsWith("tel:")) {
+        targetFinalUrl = "https://diintech.com"; // Fallback landing page for protocol validation (diintech.com is active)
+      }
+
       let videoAssetResourceName = "";
       let activeImageUrl = imageUrl;
 
-      // If imageUrl is a YouTube video, register it and use the cover thumbnail for image assets
-      const videoId = extractYoutubeVideoId(imageUrl);
-      if (videoId) {
-        videoAssetResourceName = await registerYoutubeVideoAsset(creds, videoId);
-        activeImageUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+      // If videoUrl is provided, use it. Otherwise fall back to checking if imageUrl is a YouTube URL.
+      const targetVideoUrl = videoUrl || (extractYoutubeVideoId(imageUrl) ? imageUrl : null);
+      if (targetVideoUrl) {
+        const videoId = extractYoutubeVideoId(targetVideoUrl);
+        if (videoId) {
+          videoAssetResourceName = await registerYoutubeVideoAsset(creds, videoId);
+          // If we registered a video but have no separate image, use the cover thumbnail for display ads
+          if (!imageUrl) {
+            activeImageUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+          }
+        }
       }
 
       // Fallbacks in case old schema is passed
@@ -302,19 +495,24 @@ const GoogleAdsService = {
         ? googleAdCopy.descriptions.map(d => ({ text: cleanText(d, 90) }))
         : [{ text: cleanText(googleAdCopy.primaryText || googleAdCopy.description || "Discover our amazing services", 90) }, { text: "Contact us today for more information." }];
 
+      const allImages = [...(imageUrls || []), activeImageUrl].filter(Boolean);
+      const uniqueImages = [...new Set(allImages)];
+
       let adPayload;
       if (adType === "search") {
         adPayload = {
           responsiveSearchAd: { headlines, descriptions },
-          finalUrls: [finalUrl],
+          finalUrls: [targetFinalUrl],
         };
       } else if (adType === "display") {
-        let landscapeAsset = null;
-        let squareAsset = null;
+        let marketingImages = [];
+        let squareMarketingImages = [];
         
-        if (activeImageUrl) {
-          landscapeAsset = await GoogleAdsService.uploadImageAsset(creds, activeImageUrl, "landscape");
-          squareAsset = await GoogleAdsService.uploadImageAsset(creds, activeImageUrl, "square");
+        for (const img of uniqueImages) {
+          const landscape = await GoogleAdsService.uploadImageAsset(creds, img, "landscape");
+          const square = await GoogleAdsService.uploadImageAsset(creds, img, "square");
+          if (landscape) marketingImages.push({ asset: landscape });
+          if (square) squareMarketingImages.push({ asset: square });
         }
         
         adPayload = {
@@ -323,26 +521,27 @@ const GoogleAdsService = {
             longHeadline: descriptions[0], // up to 90 chars
             descriptions: [descriptions[0]],
             businessName: cleanText(businessName || "Diin Tech", 25),
-            marketingImages: landscapeAsset ? [{ asset: landscapeAsset }] : [],
-            squareMarketingImages: squareAsset ? [{ asset: squareAsset }] : [],
+            marketingImages,
+            squareMarketingImages,
             youtubeVideos: videoAssetResourceName ? [{ asset: videoAssetResourceName }] : [],
           },
-          finalUrls: [finalUrl],
+          finalUrls: [targetFinalUrl],
         };
       } else if (adType === "app") {
-        let landscapeAsset = null;
-        let squareAsset = null;
+        let appImages = [];
         
-        if (activeImageUrl) {
-          landscapeAsset = await GoogleAdsService.uploadImageAsset(creds, activeImageUrl, "landscape");
-          squareAsset = await GoogleAdsService.uploadImageAsset(creds, activeImageUrl, "square");
+        for (const img of uniqueImages) {
+          const landscape = await GoogleAdsService.uploadImageAsset(creds, img, "landscape");
+          const square = await GoogleAdsService.uploadImageAsset(creds, img, "square");
+          if (landscape) appImages.push({ asset: landscape });
+          if (square) appImages.push({ asset: square });
         }
         
         adPayload = {
           appAd: {
             headlines: headlines,
             descriptions: descriptions,
-            images: landscapeAsset ? [{ asset: landscapeAsset }] : (squareAsset ? [{ asset: squareAsset }] : []),
+            images: appImages,
             youtubeVideos: videoAssetResourceName ? [{ asset: videoAssetResourceName }] : []
           }
         };
@@ -352,7 +551,7 @@ const GoogleAdsService = {
             video: { resourceName: videoAssetResourceName || "" },
             inStream: { actionHeadline: cleanText(googleAdCopy.videoHeadline || googleAdCopy.headline || "Special Offer", 15) },
           },
-          finalUrls: [finalUrl],
+          finalUrls: [targetFinalUrl],
         };
       }
 
@@ -361,6 +560,108 @@ const GoogleAdsService = {
       });
       return res.data.results[0].resourceName;
     } catch (err) { handleError(err); }
+  },
+
+  addCallAssetToCampaign: async (creds, campaignResourceName, telLink) => {
+    try {
+      const token = await getAccessToken(creds.refreshToken);
+      const api = client(token, creds.developerToken, creds.customerId);
+
+      // Parse phone number
+      let clean = telLink.replace("tel:", "").replace(/[+\s()-]/g, "");
+      let countryCode = "IN";
+      let number = clean;
+      if (clean.startsWith("91") && clean.length === 12) {
+        number = clean.slice(2);
+      }
+
+      // 1. Create CALL asset
+      const assetRes = await api.post("/assets:mutate", {
+        operations: [{
+          create: {
+            type: "CALL",
+            name: `CallAsset_${clean}_${Date.now()}`,
+            callAsset: {
+              countryCode,
+              phoneNumber: number,
+              callConversionReportingState: "DISABLED"
+            }
+          }
+        }]
+      });
+      const assetResourceName = assetRes.data.results[0].resourceName;
+
+      // 2. Link CALL asset to the campaign
+      await api.post("/campaignAssets:mutate", {
+        operations: [{
+          create: {
+            campaign: campaignResourceName,
+            asset: assetResourceName,
+            fieldType: "CALL"
+          }
+        }]
+      });
+      console.log(`[Google Ads] Successfully linked Call Asset ${assetResourceName} to Campaign ${campaignResourceName}`);
+    } catch (err) {
+      console.error("[Google Ads] Failed to add Call Asset to campaign:", err.response?.data || err.message);
+    }
+  },
+
+  addLeadFormAssetToCampaign: async (creds, campaignResourceName, businessName, formTitle, formDescription, webhookUrl, webhookKey) => {
+    try {
+      const token = await getAccessToken(creds.refreshToken);
+      const api = client(token, creds.developerToken, creds.customerId);
+
+      // Create LEAD_FORM asset
+      const assetRes = await api.post("/assets:mutate", {
+        operations: [{
+          create: {
+            type: "LEAD_FORM",
+            name: `LeadForm_${Date.now()}`,
+            leadFormAsset: {
+              businessName: cleanText(businessName || "Diin Tech", 25),
+              headline: cleanText(formTitle || "Get in Touch", 30),
+              description: cleanText(formDescription || "Fill the form below to receive more details.", 90),
+              privacyPolicyUrl: "https://diintech.com/privacy-policy",
+              postSubmitHeadline: "Thank You!",
+              postSubmitDescription: "We have received your details and will get back to you shortly.",
+              callToActionType: "LEARN_MORE",
+              callToActionDescription: "Apply now for details.",
+              fields: [
+                { inputType: "FULL_NAME" },
+                { inputType: "EMAIL" },
+                { inputType: "PHONE_NUMBER" }
+              ],
+              deliveryMethods: [
+                {
+                  webhook: {
+                    advertiserWebhookUrl: webhookUrl,
+                    googleSecret: webhookKey,
+                    payloadSchemaVersion: 3
+                  }
+                }
+              ]
+            }
+          }
+        }]
+      });
+      const assetResourceName = assetRes.data.results[0].resourceName;
+
+      // Link LEAD_FORM asset to the campaign
+      await api.post("/campaignAssets:mutate", {
+        operations: [{
+          create: {
+            campaign: campaignResourceName,
+            asset: assetResourceName,
+            fieldType: "LEAD_FORM"
+          }
+        }]
+      });
+      console.log(`[Google Ads] Successfully linked Lead Form Asset ${assetResourceName} to Campaign ${campaignResourceName}`);
+      return assetResourceName;
+    } catch (err) {
+      console.error("[Google Ads] Failed to add Lead Form Asset to campaign:", JSON.stringify(err.response?.data, null, 2) || err.message);
+    }
   },
 
   updateStatus: async (creds, googleCampaignId, status) => {

@@ -87,8 +87,10 @@ const CampaignService = {
     // ── Pre-flight Validation ──
     const missing = [];
     const obj = campaign.objective || "TRAFFIC";
-    if (obj === "CONVERSIONS" || obj === "SALES" || obj === "APP_PROMOTION") {
-      if (!campaign.pixelId) missing.push("Conversions/Sales objective requires a Facebook Pixel ID.");
+    if (campaign.platform === "meta" || campaign.platform === "both") {
+      if (obj === "CONVERSIONS" || obj === "SALES" || obj === "APP_PROMOTION") {
+        if (!campaign.pixelId) missing.push("Conversions/Sales objective requires a Facebook Pixel ID.");
+      }
     }
     
     if (missing.length > 0) {
@@ -145,12 +147,39 @@ const CampaignService = {
           for (const ad of campaign.ads) {
             if (ad.metaAdId) continue; // Skip if already created
 
-            let imageHash = null;
+            let mediaList = [];
             let videoId = null;
             let finalThumbnailUrl = ad.thumbnailUrl;
             
-            if (ad.imageUrl) {
-              const isVideo = ad.imageUrl.endsWith(".mp4") || ad.imageUrl.includes("/video/upload/");
+            if (ad.imageUrls && ad.imageUrls.length > 1) {
+              // Carousel / Mixed Media
+              for (const url of ad.imageUrls) {
+                try {
+                  const isVideo = url.match(/\.(mp4|mov|webm)$/i) || url.includes("/video/upload/");
+                  if (isVideo) {
+                    const vid = await MetaService.uploadVideo(accessToken, adAccountId, url);
+                    let thumbHash = null;
+                    try {
+                      let thumbUrl = (ad.carouselThumbnails && ad.carouselThumbnails.get(url)) || ad.thumbnailUrl;
+                      if (!thumbUrl) {
+                        thumbUrl = url.replace('.mp4', '.jpg').replace('/video/upload/', '/image/upload/');
+                      }
+                      thumbHash = await MetaService.uploadImage(accessToken, adAccountId, thumbUrl);
+                    } catch (e) {
+                      console.warn("Failed to upload auto-generated thumbnail for carousel video", e.message);
+                    }
+                    if (vid) mediaList.push({ type: 'video', id: vid, thumbHash });
+                  } else {
+                    const hash = await MetaService.uploadImage(accessToken, adAccountId, url);
+                    if (hash) mediaList.push({ type: 'image', id: hash });
+                  }
+                } catch (err) {
+                  console.warn("[Meta Fallback] Mixed media carousel upload failed", err.message);
+                }
+              }
+            } else if (ad.imageUrl) {
+              // Single Image or Video
+              const isVideo = ad.imageUrl.match(/\.(mp4|mov|webm)$/i) || ad.imageUrl.includes("/video/upload/");
               
               if (isVideo && !finalThumbnailUrl) {
                 // Smart Cloudinary Fallback to auto-generate thumbnail from the first frame
@@ -161,7 +190,8 @@ const CampaignService = {
                   videoId = await MetaService.uploadVideo(accessToken, adAccountId, ad.imageUrl);
                   if (!videoId) throw new Error("Meta API did not return a Video ID");
                 } else {
-                  imageHash = await MetaService.uploadImage(accessToken, adAccountId, ad.imageUrl);
+                  const hash = await MetaService.uploadImage(accessToken, adAccountId, ad.imageUrl);
+                  if (hash) mediaList.push({ type: 'image', id: hash });
                 }
               } catch (err) {
                 console.warn("[Meta Fallback] Media upload failed", err.message);
@@ -173,7 +203,7 @@ const CampaignService = {
               name: ad.name || campaign.name,
               pageId: process.env.META_PAGE_ID,
               adCopy: ad.metaAdCopy || ad.adCopy,
-              imageHash,
+              mediaList,
               videoId,
               imageUrl: ad.imageUrl,
               thumbnailUrl: finalThumbnailUrl,
@@ -209,23 +239,61 @@ const CampaignService = {
         const gcId = await GoogleAdsService.createCampaign(creds, campaign);
         updates.googleCampaignId = gcId;
         
-        // Add Campaign Criteria (Location & Language)
+        // Add Campaign Criteria (Location, Language, & Ad Schedules)
+        let loc = null;
         if (campaign.adSets && campaign.adSets.length > 0 && campaign.adSets[0].targeting?.locations?.length > 0) {
-          const loc = campaign.adSets[0].targeting.locations[0];
-          await GoogleAdsService.setCampaignCriteria(creds, gcId, loc);
+          loc = campaign.adSets[0].targeting.locations[0];
         }
-        const agId = await GoogleAdsService.createAdGroup(creds, gcId, campaign);
-        updates.googleAdGroupId = agId;
-        
-        // Add keywords to Ad Group so Google RSA can get 'Excellent' strength
-        if (campaign.aiContent && campaign.aiContent.keywords) {
-          await GoogleAdsService.addKeywordsToAdGroup(creds, agId, campaign.aiContent.keywords);
+        await GoogleAdsService.setCampaignCriteria(creds, gcId, loc, campaign);
+
+        // Link Call Asset if CTA is phone call
+        if (campaign.link && campaign.link.startsWith("tel:")) {
+          await GoogleAdsService.addCallAssetToCampaign(creds, gcId, campaign.link);
         }
 
-        // Create ads from campaign.ads
-        for (const ad of campaign.ads) {
+        // Link Lead Form Asset if Objective is LEADS
+        if (campaign.objective === "LEADS") {
+          const serverUrl = process.env.SERVER_URL || "https://ai-marketing-backend-nmoc.onrender.com";
+          const webhookUrl = `${serverUrl}/api/webhooks/google`;
+          const webhookKey = process.env.GOOGLE_WEBHOOK_KEY || "diintech_google_webhook_secret_2026";
+          
+          await GoogleAdsService.addLeadFormAssetToCampaign(
+            creds,
+            gcId,
+            campaign.businessName || campaign.name,
+            campaign.googleLeadFormTitle || "Get Leads",
+            campaign.googleLeadFormDescription || "Fill the form below to receive more details.",
+            webhookUrl,
+            webhookKey
+          );
+        }
+
+        if (campaign.googleAdType === "pmax") {
+          const ad = campaign.ads[0];
           const finalUrl = ad.link || campaign.link || "https://www.example.com";
-          await GoogleAdsService.createAd(creds, agId, ad.googleAdCopy || ad.adCopy, campaign.googleAdType, finalUrl, ad.imageUrl, campaign.businessName);
+          const agId = await GoogleAdsService.createPmaxAssetGroup(
+            creds,
+            gcId,
+            campaign,
+            ad.googleAdCopy || ad.adCopy,
+            ad.imageUrls || [ad.imageUrl],
+            campaign.logoUrl || null,
+            campaign.businessName,
+            finalUrl
+          );
+          updates.googleAdGroupId = agId;
+        } else {
+          const agId = await GoogleAdsService.createAdGroup(creds, gcId, campaign);
+          updates.googleAdGroupId = agId;
+          
+          if (campaign.aiContent && campaign.aiContent.keywords) {
+            await GoogleAdsService.addKeywordsToAdGroup(creds, agId, campaign.aiContent.keywords);
+          }
+
+          for (const ad of campaign.ads) {
+            const finalUrl = ad.link || campaign.link || "https://www.example.com";
+            await GoogleAdsService.createAd(creds, agId, ad.googleAdCopy || ad.adCopy, campaign.googleAdType, finalUrl, ad.imageUrl, campaign.businessName, ad.videoUrl || campaign.videoUrl, ad.imageUrls || []);
+          }
         }
       } else {
         await GoogleAdsService.enableCampaign(creds, campaign.googleCampaignId);

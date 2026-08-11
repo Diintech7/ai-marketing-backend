@@ -64,8 +64,10 @@ import notificationRoutes from "./routes/notification.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import externalRoutes from "./routes/external.routes.js";
 import webhookRoutes from "./routes/webhook.routes.js";
+import extensionAuthRoutes from "./routes/extensionAuth.routes.js";
 
 app.use("/api/auth", authRoutes);
+app.use("/api/auth/extension", extensionAuthRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/campaigns", campaignRoutes);
 app.use("/api/meta", metaRoutes);

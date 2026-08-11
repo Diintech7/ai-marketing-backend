@@ -181,14 +181,33 @@ const MetaService = {
             objectStorySpec.video_data.image_url = payload.imageUrl; 
           }
         } else {
-          objectStorySpec.link_data = {
-            message: payload.adCopy.primaryText,
-            link: payload.link || "https://example.com",
-            name: payload.adCopy.headline,
-            description: payload.adCopy.description,
-            call_to_action: { type: ctaType, value: ctaValue },
-            ...(payload.imageHash ? { image_hash: payload.imageHash } : (payload.imageUrl && { picture: payload.imageUrl })),
-          };
+          if (payload.mediaList && payload.mediaList.length > 1) {
+            // Carousel Ad (Mixed Media)
+            objectStorySpec.link_data = {
+              message: payload.adCopy.primaryText,
+              link: payload.link || "https://example.com",
+              child_attachments: payload.mediaList.map(media => ({
+                link: payload.link || "https://example.com",
+                ...(media.type === 'video' ? { video_id: media.id, image_hash: media.thumbHash } : { image_hash: media.id }),
+                name: payload.adCopy.headline,
+                description: payload.adCopy.description,
+                call_to_action: { type: ctaType, value: ctaValue }
+              })),
+              multi_share_optimized: true,
+              multi_share_end_card: false
+            };
+          } else {
+            // Single Image Ad (Single video is handled in the if(payload.videoId) block above)
+            const singleImageHash = (payload.mediaList && payload.mediaList.length > 0 && payload.mediaList[0].type === 'image') ? payload.mediaList[0].id : payload.imageHash;
+            objectStorySpec.link_data = {
+              message: payload.adCopy.primaryText,
+              link: payload.link || "https://example.com",
+              name: payload.adCopy.headline,
+              description: payload.adCopy.description,
+              call_to_action: { type: ctaType, value: ctaValue },
+              ...(singleImageHash ? { image_hash: singleImageHash } : (payload.imageUrl && { picture: payload.imageUrl })),
+            };
+          }
         }
 
         const { data } = await metaClient(accessToken).post(`/act_${adAccountId}/adcreatives`, {
