@@ -87,12 +87,20 @@ const MetaService = {
 
       if (obj === "TRAFFIC") {
         optimization_goal = "LINK_CLICKS";
-      } else if (obj === "CONVERSIONS" || obj === "SALES" || obj === "APP_PROMOTION") {
+      } else if (obj === "CONVERSIONS" || obj === "SALES") {
         optimization_goal = "OFFSITE_CONVERSIONS";
         if (payload.pixelId) {
           promoted_object = {
             pixel_id: payload.pixelId,
             custom_event_type: "LEAD"
+          };
+        }
+      } else if (obj === "APP_PROMOTION") {
+        optimization_goal = "APP_INSTALLS";
+        if (payload.appId) {
+          promoted_object = {
+            application_id: payload.appId,
+            object_store_url: payload.appStoreUrl
           };
         }
       } else if (obj === "LEADS") {
@@ -109,6 +117,27 @@ const MetaService = {
       console.log("[DEBUG createAdSet] Optimization Goal:", optimization_goal);
       console.log("[DEBUG createAdSet] Promoted Object:", promoted_object);
 
+      let startTime = payload.startDate ? new Date(payload.startDate) : new Date();
+      let startTimeStr = payload.startDate || startTime.toISOString();
+      
+      // If start time is in the past, adjust it to current time + 10 mins
+      if (startTime.getTime() < Date.now()) {
+        startTime = new Date(Date.now() + 10 * 60 * 1000); // 10 mins future
+        startTimeStr = startTime.toISOString();
+        console.log("[DEBUG createAdSet] Adjusted Start Time to:", startTimeStr);
+      }
+
+      let endTimeStr = payload.endDate;
+      if (endTimeStr) {
+        let endTime = new Date(endTimeStr);
+        const diffHours = (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60);
+        if (diffHours < 24) {
+          endTime = new Date(startTime.getTime() + 24.5 * 60 * 60 * 1000); // Add 24.5 hours to adjusted start time
+          endTimeStr = endTime.toISOString();
+          console.log("[DEBUG createAdSet] Adjusted End Time to:", endTimeStr);
+        }
+      }
+
       const { data } = await metaClient(accessToken).post(`/act_${adAccountId}/adsets`, {
         name: payload.name,
         campaign_id: payload.metaCampaignId,
@@ -119,8 +148,8 @@ const MetaService = {
         bid_strategy: "LOWEST_COST_WITHOUT_CAP",
         status: "PAUSED",
         targeting: buildTargeting(payload.targeting),
-        start_time: payload.startDate || undefined,
-        end_time: payload.endDate || undefined,
+        start_time: startTimeStr,
+        end_time: endTimeStr || undefined,
       });
       return data;
     } catch (err) { handleMetaError(err); }
@@ -156,6 +185,12 @@ const MetaService = {
         const VALID_CTAS = ["BOOK_TRAVEL","CONTACT_US","DONATE","DONATE_NOW","DOWNLOAD","GET_DIRECTIONS","GO_LIVE","INTERESTED","LEARN_MORE","SEE_DETAILS","LIKE_PAGE","MESSAGE_PAGE","RAISE_MONEY","SAVE","SEND_TIP","SHOP_NOW","SIGN_UP","VIEW_INSTAGRAM_PROFILE","INSTAGRAM_MESSAGE","LOYALTY_LEARN_MORE","PURCHASE_GIFT_CARDS","PAY_TO_ACCESS","SEE_MORE","TRY_IN_CAMERA","WHATSAPP_LINK","GET_IN_TOUCH","TRY_NOW","ASK_A_QUESTION","START_A_CHAT","CHAT_NOW","ASK_US","CHAT_WITH_US","BOOK_NOW","CHECK_AVAILABILITY","ORDER_NOW","WHATSAPP_MESSAGE","GET_MOBILE_APP","INSTALL_MOBILE_APP","USE_MOBILE_APP","INSTALL_APP","USE_APP","PLAY_GAME","TRY_DEMO","WATCH_VIDEO","WATCH_MORE","OPEN_LINK","NO_BUTTON","LISTEN_MUSIC","MOBILE_DOWNLOAD","GET_OFFER","GET_OFFER_VIEW","BUY_NOW","BUY_TICKETS","UPDATE_APP","BET_NOW","ADD_TO_CART","SELL_NOW","GET_SHOWTIMES","LISTEN_NOW","GET_EVENT_TICKETS","REMIND_ME","SEARCH_MORE","PRE_REGISTER","SWIPE_UP_PRODUCT","SWIPE_UP_SHOP","PLAY_GAME_ON_FACEBOOK","VISIT_WORLD","OPEN_INSTANT_APP","JOIN_GROUP","GET_PROMOTIONS","SEND_UPDATES","INQUIRE_NOW","VISIT_PROFILE","CHAT_ON_WHATSAPP","EXPLORE_MORE","CONFIRM","JOIN_CHANNEL","MAKE_AN_APPOINTMENT","ASK_ABOUT_SERVICES","BOOK_A_CONSULTATION","GET_A_QUOTE","BUY_VIA_MESSAGE","ASK_FOR_MORE_INFO","VIEW_PRODUCT","VIEW_CHANNEL","WATCH_LIVE_VIDEO","JOIN_LIVE_VIDEO","IMAGINE","CALL","MISSED_CALL","CALL_NOW","CALL_ME","APPLY_NOW","BUY","GET_QUOTE","SUBSCRIBE","RECORD_NOW","VOTE_NOW","GIVE_FREE_RIDES","REGISTER_NOW","OPEN_MESSENGER_EXT","EVENT_RSVP","CIVIC_ACTION","SEND_INVITES","REFER_FRIENDS","REQUEST_TIME","SEE_MENU","SEARCH","TRY_IT","TRY_ON","LINK_CARD","DIAL_CODE","FIND_YOUR_GROUPS","START_ORDER"];
         if (!VALID_CTAS.includes(ctaType)) ctaType = "LEARN_MORE";
 
+        // Workaround for unlinked WhatsApp numbers: Force WhatsApp CTAs to "LEARN_MORE" 
+        // so Facebook treats the wa.me URL as a normal website, preventing API rejections.
+        if (["WHATSAPP_MESSAGE", "WHATSAPP_LINK", "CHAT_ON_WHATSAPP"].includes(ctaType)) {
+            ctaType = "LEARN_MORE";
+        }
+
         const objectStorySpec = { page_id: payload.pageId };
         
         let leadGenFormId = null;
@@ -181,14 +216,15 @@ const MetaService = {
             objectStorySpec.video_data.image_url = payload.imageUrl; 
           }
         } else {
-          if (payload.mediaList && payload.mediaList.length > 1) {
-            // Carousel Ad (Mixed Media)
+          const carouselMedia = (payload.mediaList || []).filter(media => media.type === 'image');
+          if (carouselMedia.length > 1) {
+            // Carousel Ad (Filtered to Images Only for Meta safety)
             objectStorySpec.link_data = {
               message: payload.adCopy.primaryText,
               link: payload.link || "https://example.com",
-              child_attachments: payload.mediaList.map(media => ({
+              child_attachments: carouselMedia.map(media => ({
                 link: payload.link || "https://example.com",
-                ...(media.type === 'video' ? { video_id: media.id, image_hash: media.thumbHash } : { image_hash: media.id }),
+                image_hash: media.id,
                 name: payload.adCopy.headline,
                 description: payload.adCopy.description,
                 call_to_action: { type: ctaType, value: ctaValue }
@@ -197,8 +233,8 @@ const MetaService = {
               multi_share_end_card: false
             };
           } else {
-            // Single Image Ad (Single video is handled in the if(payload.videoId) block above)
-            const singleImageHash = (payload.mediaList && payload.mediaList.length > 0 && payload.mediaList[0].type === 'image') ? payload.mediaList[0].id : payload.imageHash;
+            // Fallback to Single Image Ad
+            const singleImageHash = (carouselMedia.length > 0) ? carouselMedia[0].id : payload.imageHash;
             objectStorySpec.link_data = {
               message: payload.adCopy.primaryText,
               link: payload.link || "https://example.com",
@@ -278,6 +314,17 @@ const MetaService = {
     } catch (err) { handleMetaError(err); }
   },
 
+  getLiveCampaignDetails: async (accessToken, metaCampaignId) => {
+    try {
+      const { data } = await metaClient(accessToken).get(`/${metaCampaignId}`, {
+        params: {
+          fields: "id,name,status,effective_status,issues_info,adsets{id,name,status,effective_status,targeting},ads{id,name,status,effective_status,creative{id,name},recommendations,issues_info,ad_review_feedback}"
+        }
+      });
+      return data;
+    } catch (err) { handleMetaError(err); }
+  },
+
   getAccountInsights: async (accessToken, adAccountId, dateRange = "last_30d") => {
     try {
       const { data } = await metaClient(accessToken).get(`/act_${adAccountId}/insights`, {
@@ -293,25 +340,34 @@ const MetaService = {
 };
 
 // ─── Targeting Builder ─────────────────────────────────────
-const buildTargeting = (targeting = {}) => ({
-  age_min: targeting.ageMin || 18,
-  age_max: targeting.ageMax || 65,
-  targeting_automation: {
-    advantage_audience: 0
-  },
-  ...(targeting.genders?.length && { genders: targeting.genders }),
-  geo_locations: {
-    custom_locations: targeting.locations?.filter(l => l.lat && l.lng).map((l) => ({
-      latitude: l.lat,
-      longitude: l.lng,
-      radius: l.radius || 10,
-      distance_unit: "kilometer"
-    })) || [],
-    countries: targeting.locations?.length && targeting.locations.some(l => l.lat) ? [] : ["IN"],
-  },
-  ...(targeting.interests?.length && {
-    flexible_spec: [{ interests: targeting.interests.map((i) => ({ id: i.id, name: i.name })) }],
-  }),
-});
+const buildTargeting = (targeting = {}) => {
+  const spec = {
+    age_min: targeting.ageMin || 18,
+    age_max: targeting.ageMax || 65,
+    targeting_automation: {
+      advantage_audience: 0
+    },
+    ...(targeting.genders?.length && { genders: targeting.genders }),
+    geo_locations: {
+      custom_locations: targeting.locations?.filter(l => l.lat && l.lng).map((l) => ({
+        latitude: l.lat,
+        longitude: l.lng,
+        radius: l.radius || 10,
+        distance_unit: "kilometer"
+      })) || [],
+      countries: targeting.locations?.length && targeting.locations.some(l => l.lat) ? [] : ["IN"],
+    },
+    ...(targeting.interests?.length && {
+      flexible_spec: [{ interests: targeting.interests.map((i) => ({ id: i.id, name: i.name })) }],
+    }),
+  };
+
+  if (targeting.publisher_platforms && targeting.publisher_platforms.length > 0) {
+    spec.publisher_platforms = targeting.publisher_platforms;
+    spec.device_platforms = ["mobile", "desktop"];
+  }
+
+  return spec;
+};
 
 export default MetaService;

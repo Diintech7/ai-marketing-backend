@@ -183,3 +183,49 @@ export const rechargeClientWallet = async (req, res, next) => {
     next(err);
   }
 };
+
+// Update an Admin (SuperAdmin only)
+export const updateAdmin = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { name, email, password } = req.body;
+    
+    const admin = await User.findById(id);
+    if (!admin || admin.role !== ROLES.ADMIN) {
+      throw new AppError("Admin not found", 404);
+    }
+
+    if (email && email !== admin.email) {
+      const existing = await User.findOne({ email });
+      if (existing) throw new AppError("Email already exists", 409);
+      admin.email = email;
+    }
+
+    admin.name = name || admin.name;
+    if (password) admin.password = password;
+
+    await admin.save();
+    successResponse(res, { id: admin._id, name: admin.name, email: admin.email }, "Admin updated successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Delete an Admin (SuperAdmin only)
+export const deleteAdmin = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const admin = await User.findById(id);
+    if (!admin || admin.role !== ROLES.ADMIN) {
+      throw new AppError("Admin not found", 404);
+    }
+
+    // Unassign clients currently assigned to this admin
+    await User.updateMany({ assignedAdmin: id }, { assignedAdmin: null });
+
+    await User.findByIdAndDelete(id);
+    successResponse(res, null, "Admin deleted successfully");
+  } catch (err) {
+    next(err);
+  }
+};

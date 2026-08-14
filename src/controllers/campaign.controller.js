@@ -67,6 +67,13 @@ export const syncInsights = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+export const syncStatus = async (req, res, next) => {
+  try {
+    const campaign = await CampaignService.syncStatus(req.user, req.params.id);
+    successResponse(res, campaign, "Status synced");
+  } catch (err) { next(err); }
+};
+
 export const remove = async (req, res, next) => {
   try {
     await CampaignService.delete(req.user, req.params.id);
@@ -84,5 +91,32 @@ export const uploadImage = async (req, res, next) => {
       resource_type: "auto",
     });
     successResponse(res, { url: result.secure_url, publicId: result.public_id }, "Image uploaded");
+  } catch (err) { next(err); }
+};
+
+export const uploadVideo = async (req, res, next) => {
+  try {
+    if (!req.file) throw new Error("No video uploaded");
+    const getCloudinary = (await import("../config/cloudinary.js")).default;
+    
+    const streamUpload = (req) => {
+      return new Promise((resolve, reject) => {
+        const stream = getCloudinary().uploader.upload_chunked_stream(
+          {
+            folder: `ai-marketing/${req.user._id}/uploads`,
+            resource_type: "video",
+            timeout: 600000 // 10 minutes timeout for Cloudinary API
+          },
+          (error, result) => {
+            if (result) resolve(result);
+            else reject(error);
+          }
+        );
+        stream.end(req.file.buffer);
+      });
+    };
+
+    const result = await streamUpload(req);
+    successResponse(res, { url: result.secure_url, publicId: result.public_id }, "Video uploaded");
   } catch (err) { next(err); }
 };

@@ -9,6 +9,8 @@ const adSetSchema = new mongoose.Schema({
     genders: [{ type: Number }], // 1=male, 2=female
     locations: [{ city: String, country: String, region: String, radius: Number, lat: Number, lng: Number }],
     interests: [{ id: String, name: String }],
+    languages: [{ id: String, name: String }],
+    publisher_platforms: [{ type: String }],
   },
   budget: { type: Number, required: true }, // in paise
   budgetType: { type: String, enum: ["daily", "weekly", "monthly", "lifetime"], default: "daily" },

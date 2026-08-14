@@ -23,6 +23,8 @@ router.post("/reject-client/:id", adminController.rejectClient);
 router.post("/create-admin", restrictTo(ROLES.SUPERADMIN), adminController.createAdmin);
 router.get("/admins", restrictTo(ROLES.SUPERADMIN), adminController.getAdmins);
 router.get("/admins/:id/clients", restrictTo(ROLES.SUPERADMIN), adminController.getAdminClients);
+router.put("/admins/:id", restrictTo(ROLES.SUPERADMIN), adminController.updateAdmin);
+router.delete("/admins/:id", restrictTo(ROLES.SUPERADMIN), adminController.deleteAdmin);
 
 // ----------------------------------------------------
 // Admin Only Routes

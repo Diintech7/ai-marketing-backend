@@ -154,10 +154,10 @@ const GoogleAdsService = {
         };
       } else {
         const obj = campaign.objective || "TRAFFIC";
-        if (["pmax"].includes(campaign.googleAdType)) {
-          biddingStrategy = { maximizeConversions: {} }; // PMax only supports this
+        if (["pmax", "youtube", "video"].includes(campaign.googleAdType)) {
+          biddingStrategy = { maximizeConversions: {} }; // PMax and Video Action require this
         } else if (obj === "TRAFFIC") {
-          biddingStrategy = { maximizeClicks: {} };
+          biddingStrategy = { targetSpend: {} };
         } else if (obj === "AWARENESS") {
           biddingStrategy = { manualCpm: {} };
         } else {
@@ -183,12 +183,16 @@ const GoogleAdsService = {
             name: `${campaign.name} ${timestamp}`,
             status: "PAUSED",
             advertisingChannelType: CHANNEL_MAP[campaign.googleAdType] || "SEARCH",
+            ...(CHANNEL_MAP[campaign.googleAdType] === "VIDEO" && { 
+              advertisingChannelSubType: "VIDEO_ACTION",
+              audienceSetting: { useAudienceGrouped: true }
+            }),
             campaignBudget: budgetId,
             ...biddingStrategy,
             containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
             ...(campaign.googleAdType === "pmax" && { brandGuidelinesEnabled: false }),
             ...(startDateTimeStr && { startDateTime: startDateTimeStr }),
-            ...(endDateTimeStr && { endDateTime: endDateTimeStr }),
+            ...(endDateTimeStr && CHANNEL_MAP[campaign.googleAdType] !== "VIDEO" && { endDateTime: endDateTimeStr }),
           },
         }],
       });
@@ -285,7 +289,9 @@ const GoogleAdsService = {
         status: "ENABLED",
       };
 
-      if (isCpm) {
+      if (["video", "youtube"].includes(campaign.googleAdType)) {
+        adGroupData.type = "VIDEO_RESPONSIVE";
+      } else if (isCpm) {
         adGroupData.cpmBidMicros = 1000000; // 1 INR CPM bid for Awareness campaigns
       } else {
         adGroupData.cpcBidMicros = 1000000; // 1 INR CPC bid for Clicks/Conversion campaigns
@@ -547,9 +553,12 @@ const GoogleAdsService = {
         };
       } else {
         adPayload = {
-          videoAd: {
-            video: { resourceName: videoAssetResourceName || "" },
-            inStream: { actionHeadline: cleanText(googleAdCopy.videoHeadline || googleAdCopy.headline || "Special Offer", 15) },
+          videoResponsiveAd: {
+            headlines: [{ text: cleanText(googleAdCopy.videoHeadline || googleAdCopy.headline || "Special Offer", 15) }],
+            longHeadlines: [{ text: cleanText(googleAdCopy.primaryText || googleAdCopy.description || "Discover our amazing services today", 90) }],
+            descriptions: [{ text: cleanText(googleAdCopy.description || "Contact us today for more information.", 90) }],
+            callToActions: [{ text: cleanText(googleAdCopy.cta || "Learn More", 10) }],
+            videos: videoAssetResourceName ? [{ asset: videoAssetResourceName }] : [],
           },
           finalUrls: [targetFinalUrl],
         };

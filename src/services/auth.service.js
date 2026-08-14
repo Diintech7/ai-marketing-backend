@@ -6,7 +6,7 @@ import AppError from "../utils/AppError.js";
 import { COOKIE_OPTIONS, ROLES } from "../constants/index.js";
 
 const AuthService = {
-  register: async ({ name, email, password }) => {
+  register: async ({ name, email, password, phone }) => {
     const existing = await AuthRepository.findByEmail(email);
     if (existing) throw new AppError("Email already registered", 409);
 
@@ -15,6 +15,7 @@ const AuthService = {
       name,
       email,
       password,
+      phone,
       // emailVerifyToken: verifyToken,
       // emailVerifyExpires: Date.now() + 24 * 60 * 60 * 1000,
       isEmailVerified: true, // Auto verify for now as per user request

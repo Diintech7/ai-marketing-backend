@@ -25,7 +25,7 @@ export const launchCampaign = async (req, res, next) => {
       category, cta, budget, durationDays, destinationUrl,
       // Advanced fields
       googleAdType, objective, businessName, imageUrls,
-      videoUrl, youtubeUrl, carouselThumbnails, leadFormDetails, pixelId
+      videoUrl, youtubeUrl, carouselThumbnails, leadFormDetails, pixelId, placements
     } = req.body;
 
     // Validation
@@ -98,6 +98,14 @@ export const launchCampaign = async (req, res, next) => {
         link:       destinationUrl,
       })),
       link: destinationUrl,
+      adSets: [{
+        name: `${aiData.campaign.name} - Ad Set`,
+        budget: Number(budget),
+        budgetType: "daily",
+        targeting: {
+          publisher_platforms: placements || null
+        }
+      }]
     };
 
     // 3. Create + Publish

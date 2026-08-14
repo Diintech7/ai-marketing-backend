@@ -10,6 +10,14 @@ export const validate = (req, res, next) => {
 export const registerValidator = [
   body("name").trim().notEmpty().withMessage("Name is required"),
   body("email").isEmail().withMessage("Valid email is required"),
+  body("phone")
+    .trim()
+    .notEmpty()
+    .withMessage("Phone number is required")
+    .matches(/^\+?[0-9]+$/)
+    .withMessage("Phone number must contain only digits")
+    .isLength({ min: 10, max: 15 })
+    .withMessage("Phone number must be between 10 and 15 digits"),
   body("password").isLength({ min: 6 }).withMessage("Password must be at least 6 characters"),
   validate,
 ];

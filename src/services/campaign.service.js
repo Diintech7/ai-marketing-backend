@@ -89,8 +89,11 @@ const CampaignService = {
     const missing = [];
     const obj = campaign.objective || "TRAFFIC";
     if (campaign.platform === "meta" || campaign.platform === "both") {
-      if (obj === "CONVERSIONS" || obj === "SALES" || obj === "APP_PROMOTION") {
+      if (obj === "CONVERSIONS" || obj === "SALES") {
         if (!campaign.pixelId) missing.push("Conversions/Sales objective requires a Facebook Pixel ID.");
+      } else if (obj === "APP_PROMOTION") {
+        if (!campaign.appId) missing.push("App Promotion objective requires an App ID.");
+        if (!campaign.link) missing.push("App Promotion objective requires an App Store / Play Store Link.");
       }
     }
     
@@ -128,13 +131,23 @@ const CampaignService = {
 
         for (const adSet of campaign.adSets) {
           if (!adSet.metaAdSetId) {
+            const adSetData = adSet.toObject();
+            if (adSetData.targeting && adSetData.targeting.publisher_platforms) {
+              const platforms = adSetData.targeting.publisher_platforms;
+              if (platforms.includes("whatsapp") && !platforms.includes("instagram")) {
+                adSetData.targeting.publisher_platforms.push("instagram");
+              }
+            }
             const ms = await MetaService.createAdSet(accessToken, adAccountId, {
-              ...adSet.toObject(),
+              ...adSetData,
               metaCampaignId: updates.metaCampaignId || campaign.metaCampaignId,
               startDate: campaign.startDate,
               endDate:   campaign.endDate,
               objective: campaign.objective,
               pixelId:   campaign.pixelId,
+              appId:     campaign.appId,
+              appStore:  campaign.appStore,
+              appStoreUrl: campaign.link,
               pageId:    process.env.META_PAGE_ID,
             });
             adSet.metaAdSetId = ms.id;
@@ -171,27 +184,38 @@ const CampaignService = {
                     }
                     if (vid) mediaList.push({ type: 'video', id: vid, thumbHash });
                   } else {
-                    const hash = await MetaService.uploadImage(accessToken, adAccountId, url);
+                    let targetUrl = url;
+                    if (targetUrl && targetUrl.includes("/image/upload/")) {
+                      // Inject Cloudinary square auto-crop transform for Carousel Cards
+                      targetUrl = targetUrl.replace("/image/upload/", "/image/upload/c_fill,g_auto,w_1080,h_1080/");
+                    }
+                    const hash = await MetaService.uploadImage(accessToken, adAccountId, targetUrl);
                     if (hash) mediaList.push({ type: 'image', id: hash });
                   }
                 } catch (err) {
                   console.warn("[Meta Fallback] Mixed media carousel upload failed", err.message);
                 }
               }
-            } else if (ad.imageUrl) {
+            } else if (ad.videoUrl || ad.imageUrl) {
               // Single Image or Video
-              const isVideo = ad.imageUrl.match(/\.(mp4|mov|webm)$/i) || ad.imageUrl.includes("/video/upload/");
+              const isVideo = !!ad.videoUrl || (ad.imageUrl && (ad.imageUrl.match(/\.(mp4|mov|webm)$/i) || ad.imageUrl.includes("/video/upload/")));
+              const mediaUrl = ad.videoUrl || ad.imageUrl;
               
               if (isVideo && !finalThumbnailUrl) {
                 // Smart Cloudinary Fallback to auto-generate thumbnail from the first frame
-                finalThumbnailUrl = ad.imageUrl.replace('.mp4', '.jpg').replace('/video/upload/', '/image/upload/');
+                finalThumbnailUrl = mediaUrl.replace('.mp4', '.jpg').replace('/video/upload/', '/image/upload/');
               }
               try {
                 if (isVideo) {
-                  videoId = await MetaService.uploadVideo(accessToken, adAccountId, ad.imageUrl);
+                  videoId = await MetaService.uploadVideo(accessToken, adAccountId, mediaUrl);
                   if (!videoId) throw new Error("Meta API did not return a Video ID");
                 } else {
-                  const hash = await MetaService.uploadImage(accessToken, adAccountId, ad.imageUrl);
+                  let targetUrl = mediaUrl;
+                  if (targetUrl && targetUrl.includes("/image/upload/")) {
+                    // Inject Cloudinary square auto-crop transform to guarantee 1:1 format for Single Image Ads
+                    targetUrl = targetUrl.replace("/image/upload/", "/image/upload/c_fill,g_auto,w_1080,h_1080/");
+                  }
+                  const hash = await MetaService.uploadImage(accessToken, adAccountId, targetUrl);
                   if (hash) mediaList.push({ type: 'image', id: hash });
                 }
               } catch (err) {
@@ -392,6 +416,191 @@ const CampaignService = {
     }
 
     return campaignRepo.updateById(campaignId, { insights });
+  },
+
+  // ─── Sync Status ────────────────────────────────────────────
+  syncStatus: async (user, campaignId) => {
+    const campaign = await campaignRepo.findByUserAndId(user._id, campaignId);
+    if (!campaign) throw new AppError("Campaign not found", 404);
+    const platform = campaign.platform || "meta";
+
+    let liveStatus = campaign.status;
+    let adSetUpdates = {};
+    let adUpdates = {};
+
+    if ((platform === "meta" || platform === "both") && campaign.metaCampaignId) {
+      try {
+        const { accessToken } = getMetaCreds(user);
+        const metaDetails = await MetaService.getLiveCampaignDetails(accessToken, campaign.metaCampaignId);
+        
+        if (metaDetails) {
+          const effStatus = metaDetails.effective_status;
+          if (effStatus === "ACTIVE") liveStatus = "active";
+          else if (effStatus === "PAUSED") liveStatus = "paused";
+          else if (effStatus === "PENDING_REVIEW") liveStatus = "active";
+          else if (effStatus === "DISAPPROVED") liveStatus = "paused";
+
+          let foundError = null;
+
+          if (metaDetails.adsets && metaDetails.adsets.data) {
+            metaDetails.adsets.data.forEach(as => {
+              const t = as.targeting || {};
+              
+              // 1. Locations extraction
+              const locations = [];
+              if (t.geo_locations) {
+                if (t.geo_locations.custom_locations) {
+                  t.geo_locations.custom_locations.forEach(cl => {
+                    locations.push({
+                      city: cl.name || `Target Area (${cl.radius} ${cl.distance_unit === 'mile' ? 'mi' : 'km'})`,
+                      radius: cl.radius || 10,
+                      lat: cl.latitude,
+                      lng: cl.longitude
+                    });
+                  });
+                }
+                if (t.geo_locations.cities) {
+                  t.geo_locations.cities.forEach(city => {
+                    locations.push({
+                      city: city.name || "Target City",
+                      radius: city.radius || 10,
+                      lat: city.latitude || 28.6139,
+                      lng: city.longitude || 77.2090
+                    });
+                  });
+                }
+                if (locations.length === 0 && t.geo_locations.countries) {
+                  t.geo_locations.countries.forEach(country => {
+                    locations.push({
+                      city: country === "IN" ? "India" : country,
+                      radius: 10,
+                      lat: country === "IN" ? 28.6139 : 20,
+                      lng: country === "IN" ? 77.2090 : 0
+                    });
+                  });
+                }
+              }
+
+              // 2. Languages extraction
+              const languages = [];
+              if (t.languages) {
+                t.languages.forEach(lang => {
+                  if (typeof lang === "object" && lang) {
+                    languages.push({
+                      id: String(lang.id || lang.key || ""),
+                      name: lang.name || ""
+                    });
+                  } else {
+                    languages.push({
+                      id: String(lang),
+                      name: String(lang)
+                    });
+                  }
+                });
+              }
+
+              // 3. Interests extraction
+              const interests = [];
+              if (t.flexible_spec) {
+                t.flexible_spec.forEach(spec => {
+                  if (spec.interests) {
+                    spec.interests.forEach(interest => {
+                      interests.push({
+                        id: String(interest.id),
+                        name: interest.name || ""
+                      });
+                    });
+                  }
+                });
+              }
+
+              adSetUpdates[as.id] = {
+                status: as.effective_status === "ACTIVE" ? "active" : "paused",
+                publisher_platforms: t.publisher_platforms || [],
+                ageMin: t.age_min || 18,
+                ageMax: t.age_max || 65,
+                genders: t.genders || [1, 2],
+                locations,
+                languages,
+                interests
+              };
+            });
+          }
+
+          if (metaDetails.ads && metaDetails.ads.data) {
+            metaDetails.ads.data.forEach(ad => {
+              let adStatus = "paused";
+              if (ad.effective_status === "ACTIVE") adStatus = "active";
+              
+              let feedback = "";
+              if (ad.ad_review_feedback && ad.ad_review_feedback.global) {
+                feedback = ad.ad_review_feedback.global;
+              }
+              if (ad.recommendations && ad.recommendations.data && ad.recommendations.data.length > 0) {
+                feedback = ad.recommendations.data[0].title + " - " + ad.recommendations.data[0].message;
+              }
+              if (ad.issues_info && ad.issues_info.length > 0) {
+                feedback = ad.issues_info[0].error_message || ad.issues_info[0].message;
+              }
+
+              if (feedback) {
+                foundError = feedback;
+              }
+
+              adUpdates[ad.id] = {
+                status: adStatus,
+                feedback: feedback
+              };
+            });
+          }
+
+          campaign.status = liveStatus;
+          if (foundError) {
+            campaign.publishError = foundError;
+          } else if (liveStatus === "active") {
+            campaign.publishError = null;
+          }
+
+          if (campaign.adSets) {
+            campaign.adSets.forEach(as => {
+              const updates = adSetUpdates[as.metaAdSetId];
+              if (as.metaAdSetId && updates) {
+                as.status = updates.status;
+                if (updates.publisher_platforms && updates.publisher_platforms.length > 0) {
+                  as.targeting.publisher_platforms = updates.publisher_platforms;
+                }
+                as.targeting.ageMin = updates.ageMin;
+                as.targeting.ageMax = updates.ageMax;
+                as.targeting.genders = updates.genders;
+                if (updates.locations && updates.locations.length > 0) {
+                  as.targeting.locations = updates.locations;
+                }
+                if (updates.interests && updates.interests.length > 0) {
+                  as.targeting.interests = updates.interests;
+                }
+                if (updates.languages) {
+                  as.targeting.languages = updates.languages;
+                }
+              }
+            });
+          }
+
+          if (campaign.ads) {
+            campaign.ads.forEach(ad => {
+              if (ad.metaAdId && adUpdates[ad.metaAdId]) {
+                ad.status = adUpdates[ad.metaAdId].status;
+              }
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Meta Sync Status Error:", err.message);
+        campaign.publishError = err.message || "Failed to sync status from Meta";
+      }
+    }
+
+    await campaign.save();
+    return campaign;
   },
 
   // ─── Delete ─────────────────────────────────────────────────
