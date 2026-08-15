@@ -302,7 +302,7 @@ const MetaService = {
   },
 
   // ─── Insights ──────────────────────────────────────────────
-  getCampaignInsights: async (accessToken, metaCampaignId, dateRange = "last_30d") => {
+  getCampaignInsights: async (accessToken, metaCampaignId, dateRange = "maximum") => {
     try {
       const { data } = await metaClient(accessToken).get(`/${metaCampaignId}/insights`, {
         params: {
@@ -311,6 +311,19 @@ const MetaService = {
         },
       });
       return data.data?.[0] || {};
+    } catch (err) { handleMetaError(err); }
+  },
+
+  getCampaignPlatformBreakdown: async (accessToken, metaCampaignId, dateRange = "maximum") => {
+    try {
+      const { data } = await metaClient(accessToken).get(`/${metaCampaignId}/insights`, {
+        params: {
+          fields: "impressions,clicks,spend,reach",
+          breakdowns: "publisher_platform",
+          date_preset: dateRange,
+        },
+      });
+      return data.data || [];
     } catch (err) { handleMetaError(err); }
   },
 

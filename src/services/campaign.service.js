@@ -394,6 +394,20 @@ const CampaignService = {
     if ((platform === "meta" || platform === "both") && campaign.metaCampaignId) {
       const { accessToken } = getMetaCreds(user);
       const raw = await MetaService.getCampaignInsights(accessToken, campaign.metaCampaignId);
+      
+      const breakdownRaw = await MetaService.getCampaignPlatformBreakdown(accessToken, campaign.metaCampaignId);
+      const platformBreakdown = {};
+      if (Array.isArray(breakdownRaw)) {
+        breakdownRaw.forEach(row => {
+          const platformName = row.publisher_platform || "unknown";
+          platformBreakdown[platformName] = {
+            impressions: Number(row.impressions) || 0,
+            clicks:      Number(row.clicks)      || 0,
+            spend:       Number(row.spend)       || 0,
+          };
+        });
+      }
+
       insights = {
         impressions: Number(raw.impressions) || 0,
         clicks:      Number(raw.clicks)      || 0,
@@ -401,6 +415,7 @@ const CampaignService = {
         reach:       Number(raw.reach)        || 0,
         ctr:         Number(raw.ctr)          || 0,
         cpc:         Number(raw.cpc)          || 0,
+        platformBreakdown,
       };
     }
 

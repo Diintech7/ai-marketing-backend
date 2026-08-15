@@ -104,6 +104,7 @@ const campaignSchema = new mongoose.Schema(
       reach: { type: Number, default: 0 },
       ctr: { type: Number, default: 0 },
       cpc: { type: Number, default: 0 },
+      platformBreakdown: { type: mongoose.Schema.Types.Mixed, default: {} }
     },
   },
   { timestamps: true }
