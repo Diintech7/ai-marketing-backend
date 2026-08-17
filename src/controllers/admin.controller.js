@@ -6,7 +6,11 @@ import { ROLES, PLANS, PLAN_CREDITS } from "../constants/index.js";
 // Fetch all pending clients
 export const getPendingClients = async (req, res, next) => {
   try {
-    const pendingClients = await User.find({ role: ROLES.CLIENT, approvalStatus: "pending" }).select("-password");
+    const filter = { role: ROLES.CLIENT, approvalStatus: "pending" };
+    if (req.user.role === ROLES.ADMIN) {
+      filter.assignedAdmin = req.user._id;
+    }
+    const pendingClients = await User.find(filter).select("-password");
     successResponse(res, pendingClients, "Pending clients fetched successfully");
   } catch (err) {
     next(err);

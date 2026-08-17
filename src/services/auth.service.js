@@ -191,6 +191,17 @@ const AuthService = {
     user.password = newPassword;
     await user.save();
   },
+
+  generateApiKey: async (userId) => {
+    const user = await AuthRepository.findById(userId);
+    if (!user) throw new AppError("User not found", 404);
+
+    const newKey = `diin_${crypto.randomBytes(16).toString("hex")}`;
+    user.apiKeys.push(newKey);
+    await user.save();
+    
+    return { apiKey: newKey };
+  },
 };
 
 export default AuthService;

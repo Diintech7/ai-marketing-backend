@@ -331,7 +331,7 @@ const MetaService = {
     try {
       const { data } = await metaClient(accessToken).get(`/${metaCampaignId}`, {
         params: {
-          fields: "id,name,status,effective_status,issues_info,adsets{id,name,status,effective_status,targeting},ads{id,name,status,effective_status,creative{id,name},recommendations,issues_info,ad_review_feedback}"
+          fields: "id,name,status,effective_status,stop_time,issues_info,adsets{id,name,status,effective_status,targeting},ads{id,name,status,effective_status,creative{id,name},recommendations,issues_info,ad_review_feedback}"
         }
       });
       return data;

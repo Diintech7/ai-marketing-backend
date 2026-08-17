@@ -148,12 +148,21 @@ export const getCampaignStatus = async (req, res, next) => {
     const user       = req.user;
     const { id }     = req.params;
 
-    const campaign = await Campaign.findOne({ _id: id, user: user._id }).select(
-      "name platform status objective budget startDate endDate createdAt updatedAt"
-    );
+    let campaign = await Campaign.findOne({ _id: id, user: user._id });
 
     if (!campaign) {
       throw new AppError("Campaign not found or access denied.", 404, "ERR_CAMPAIGN_NOT_FOUND");
+    }
+
+    // Sync status and insights on-the-fly from Meta/Google
+    if (campaign.status !== "draft") {
+      try {
+        await CampaignService.syncStatus(user, campaign._id);
+        await CampaignService.syncInsights(user, campaign._id);
+        campaign = await Campaign.findById(campaign._id);
+      } catch (syncErr) {
+        console.error(`[getCampaignStatus Sync Error] Failed to sync: ${syncErr.message}`);
+      }
     }
 
     successResponse(res, {
@@ -165,6 +174,15 @@ export const getCampaignStatus = async (req, res, next) => {
       budget:       campaign.budget,
       startDate:    campaign.startDate,
       endDate:      campaign.endDate,
+      platformBreakdown: campaign.insights?.platformBreakdown || null,
+      insights: {
+        impressions: campaign.insights?.impressions || 0,
+        clicks:      campaign.insights?.clicks || 0,
+        spend:       campaign.insights?.spend || 0,
+        reach:       campaign.insights?.reach || 0,
+        ctr:         campaign.insights?.ctr || 0,
+        cpc:         campaign.insights?.cpc || 0,
+      },
       createdAt:    campaign.createdAt,
       updatedAt:    campaign.updatedAt,
     }, "Campaign status fetched successfully");
@@ -293,7 +311,7 @@ export const syncClient = async (req, res, next) => {
         company:     businessName || "",
         role:        "client",
         assignedAdmin: partnerUser._id,
-        approvalStatus: "approved",
+        approvalStatus: "pending",
         adMode:      "PLATFORM",
         isActive:    true,
       });
@@ -304,17 +322,20 @@ export const syncClient = async (req, res, next) => {
     await log(partnerUser._id, "CLIENT_SYNCED", "success", {
       requestId: req.requestId,
       message:   `Client ${email} synced by partner ${partnerUser.name}`,
-      meta:      { clientId: clientRecord._id, created },
+      meta:      { clientId: clientRecord._id, created, approvalStatus: clientRecord.approvalStatus },
     });
 
     res.status(created ? 201 : 200).json({
       success:  true,
-      message:  created ? "Client created and synced successfully" : "Client already exists, details updated",
+      message:  created 
+        ? "Client registration request received and is pending approval." 
+        : (clientRecord.approvalStatus === "approved" ? "Client synced successfully" : "Client registration is pending approval."),
       data: {
         clientId:         clientRecord._id,
         name:             clientRecord.name,
         email:            clientRecord.email,
         businessName:     clientRecord.company,
+        approvalStatus:   clientRecord.approvalStatus,
         whatsappConfigured: false,
       },
     });

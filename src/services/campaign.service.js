@@ -450,10 +450,19 @@ const CampaignService = {
         
         if (metaDetails) {
           const effStatus = metaDetails.effective_status;
-          if (effStatus === "ACTIVE") liveStatus = "active";
-          else if (effStatus === "PAUSED") liveStatus = "paused";
-          else if (effStatus === "PENDING_REVIEW") liveStatus = "active";
-          else if (effStatus === "DISAPPROVED") liveStatus = "paused";
+          const stopTime = metaDetails.stop_time;
+
+          if (stopTime && new Date(stopTime) < new Date()) {
+            liveStatus = "completed";
+          } else if (effStatus === "ACTIVE") {
+            liveStatus = "active";
+          } else if (effStatus === "PAUSED") {
+            liveStatus = "paused";
+          } else if (effStatus === "PENDING_REVIEW") {
+            liveStatus = "active";
+          } else if (effStatus === "DISAPPROVED") {
+            liveStatus = "paused";
+          }
 
           let foundError = null;
 
