@@ -289,7 +289,9 @@ const GoogleAdsService = {
         status: "ENABLED",
       };
 
-      if (["video", "youtube"].includes(campaign.googleAdType)) {
+      if (campaign.googleAdType === "app") {
+        // App Campaigns do not support manual cpc or cpm bidding at the ad group level
+      } else if (["video", "youtube"].includes(campaign.googleAdType)) {
         adGroupData.type = "VIDEO_RESPONSIVE";
       } else if (isCpm) {
         adGroupData.cpmBidMicros = 1000000; // 1 INR CPM bid for Awareness campaigns
@@ -520,6 +522,9 @@ const GoogleAdsService = {
           if (landscape) marketingImages.push({ asset: landscape });
           if (square) squareMarketingImages.push({ asset: square });
         }
+
+        const uniqueMarketing = [...new Set(marketingImages.map(img => img.asset))];
+        const uniqueSquare = [...new Set(squareMarketingImages.map(img => img.asset))];
         
         adPayload = {
           responsiveDisplayAd: {
@@ -527,8 +532,8 @@ const GoogleAdsService = {
             longHeadline: descriptions[0], // up to 90 chars
             descriptions: [descriptions[0]],
             businessName: cleanText(businessName || "Diin Tech", 25),
-            marketingImages,
-            squareMarketingImages,
+            marketingImages: uniqueMarketing.map(asset => ({ asset })),
+            squareMarketingImages: uniqueSquare.map(asset => ({ asset })),
             youtubeVideos: videoAssetResourceName ? [{ asset: videoAssetResourceName }] : [],
           },
           finalUrls: [targetFinalUrl],
@@ -542,12 +547,14 @@ const GoogleAdsService = {
           if (landscape) appImages.push({ asset: landscape });
           if (square) appImages.push({ asset: square });
         }
+
+        const uniqueAppImages = [...new Set(appImages.map(img => img.asset))];
         
         adPayload = {
           appAd: {
-            headlines: headlines,
-            descriptions: descriptions,
-            images: appImages,
+            headlines: headlines.slice(0, 5),
+            descriptions: descriptions.slice(0, 5),
+            images: uniqueAppImages.map(asset => ({ asset })),
             youtubeVideos: videoAssetResourceName ? [{ asset: videoAssetResourceName }] : []
           }
         };

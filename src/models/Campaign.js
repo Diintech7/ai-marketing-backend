@@ -11,6 +11,7 @@ const adSetSchema = new mongoose.Schema({
     interests: [{ id: String, name: String }],
     languages: [{ id: String, name: String }],
     publisher_platforms: [{ type: String }],
+    customAudienceId: { type: String, default: null },
   },
   budget: { type: Number, required: true }, // in paise
   budgetType: { type: String, enum: ["daily", "weekly", "monthly", "lifetime"], default: "daily" },

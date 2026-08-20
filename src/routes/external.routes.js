@@ -19,6 +19,8 @@ router.post("/partner/campaigns/:id/pause", ctrl.pauseCampaign);          // Pau
 router.post("/partner/campaigns/:id/resume", ctrl.resumeCampaign);        // Resume ad
 router.delete("/partner/campaigns/:id",    ctrl.deleteCampaign);          // Delete ad
 router.post("/partner/sync-client",        ctrl.syncClient);              // Register external client
+router.get("/partner/clients",             ctrl.getClients);              // Get list of synced clients (admin only)
+router.get("/partner/clients/:clientId/campaigns", ctrl.getClientCampaigns); // Get list of client campaigns (admin only)
 router.get("/partner/activities",          ctrl.getActivityLogs);         // Fetch logs with filters
 router.put("/partner/webhook-url",         ctrl.updateWebhookUrl);        // Set webhook URL
 

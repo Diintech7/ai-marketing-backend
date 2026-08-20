@@ -83,6 +83,7 @@ const MetaService = {
 
       let optimization_goal = "REACH";
       let promoted_object = undefined;
+      let destination_type = undefined;
       const obj = payload.objective || "TRAFFIC";
 
       if (obj === "TRAFFIC") {
@@ -105,6 +106,7 @@ const MetaService = {
         }
       } else if (obj === "LEADS") {
         optimization_goal = "LEAD_GENERATION";
+        destination_type = "ON_AD";
         const pageId = payload.pageId || process.env.META_PAGE_ID;
         if (pageId) {
           promoted_object = { page_id: pageId };
@@ -150,6 +152,7 @@ const MetaService = {
         targeting: buildTargeting(payload.targeting),
         start_time: startTimeStr,
         end_time: endTimeStr || undefined,
+        ...(destination_type && { destination_type }),
       });
       return data;
     } catch (err) { handleMetaError(err); }
@@ -350,6 +353,31 @@ const MetaService = {
       return data.data || [];
     } catch (err) { handleMetaError(err); }
   },
+
+  // ─── Custom Audience ────────────────────────────────────────
+  createCustomAudience: async (accessToken, adAccountId, name, description) => {
+    try {
+      const { data } = await metaClient(accessToken).post(`/act_${adAccountId}/customaudiences`, {
+        name,
+        subtype: "CUSTOM",
+        description: description || "Uploaded via API",
+        customer_file_source: "USER_PROVIDED_ONLY"
+      });
+      return data;
+    } catch (err) { handleMetaError(err); }
+  },
+
+  addUsersToCustomAudience: async (accessToken, customAudienceId, schema, hashedData) => {
+    try {
+      const { data } = await metaClient(accessToken).post(`/${customAudienceId}/users`, {
+        payload: {
+          schema: schema,
+          data: hashedData
+        }
+      });
+      return data;
+    } catch (err) { handleMetaError(err); }
+  },
 };
 
 // ─── Targeting Builder ─────────────────────────────────────
@@ -372,6 +400,9 @@ const buildTargeting = (targeting = {}) => {
     },
     ...(targeting.interests?.length && {
       flexible_spec: [{ interests: targeting.interests.map((i) => ({ id: i.id, name: i.name })) }],
+    }),
+    ...(targeting.customAudienceId && {
+      custom_audiences: [{ id: targeting.customAudienceId }]
     }),
   };
 

@@ -20,6 +20,14 @@ export const launchCampaign = async (req, res, next) => {
   try {
     const user = req.user;
 
+    if (user.role !== "client") {
+      throw new AppError(
+        "Client API Key (x-api-key) is required to launch campaigns.",
+        403,
+        "ERR_CLIENT_KEY_REQUIRED"
+      );
+    }
+
     const {
       contentUrl, platform, geography, demography,
       category, cta, budget, durationDays, destinationUrl,
@@ -88,7 +96,10 @@ export const launchCampaign = async (req, res, next) => {
       leadFormDetails: leadFormDetails || null,
       ads: aiData.ads.slice(0, 1).map(ad => ({
         name:       `${aiData.campaign.name} - API Ad`,
-        metaAdCopy: ad.metaAdCopy,
+        metaAdCopy: {
+          ...ad.metaAdCopy,
+          ...(cta && { cta: cta.toUpperCase() })
+        },
         googleAdCopy: ad.googleAdCopy,
         imageUrl:   contentUrl || aiData.imageUrl || null,
         imageUrls:  imageUrls || [],
@@ -148,7 +159,20 @@ export const getCampaignStatus = async (req, res, next) => {
     const user       = req.user;
     const { id }     = req.params;
 
-    let campaign = await Campaign.findOne({ _id: id, user: user._id });
+    let campaign = null;
+    let campaignOwner = null;
+
+    if (user.role === "client") {
+      campaign = await Campaign.findOne({ _id: id, user: user._id });
+    } else if (["admin", "super_admin"].includes(user.role)) {
+      campaign = await Campaign.findById(id);
+      if (campaign) {
+        campaignOwner = await User.findById(campaign.user);
+        if (!campaignOwner || (user.role === "admin" && campaignOwner.assignedAdmin?.toString() !== user._id.toString())) {
+          campaign = null; // Deny access
+        }
+      }
+    }
 
     if (!campaign) {
       throw new AppError("Campaign not found or access denied.", 404, "ERR_CAMPAIGN_NOT_FOUND");
@@ -157,8 +181,9 @@ export const getCampaignStatus = async (req, res, next) => {
     // Sync status and insights on-the-fly from Meta/Google
     if (campaign.status !== "draft") {
       try {
-        await CampaignService.syncStatus(user, campaign._id);
-        await CampaignService.syncInsights(user, campaign._id);
+        const syncUser = campaignOwner || user;
+        await CampaignService.syncStatus(syncUser, campaign._id);
+        await CampaignService.syncInsights(syncUser, campaign._id);
         campaign = await Campaign.findById(campaign._id);
       } catch (syncErr) {
         console.error(`[getCampaignStatus Sync Error] Failed to sync: ${syncErr.message}`);
@@ -198,6 +223,15 @@ export const getCampaignStatus = async (req, res, next) => {
 export const pauseCampaign = async (req, res, next) => {
   try {
     const user = req.user;
+
+    if (user.role !== "client") {
+      throw new AppError(
+        "Client API Key (x-api-key) is required to pause campaigns.",
+        403,
+        "ERR_CLIENT_KEY_REQUIRED"
+      );
+    }
+
     const { id } = req.params;
 
     const campaign = await Campaign.findOne({ _id: id, user: user._id });
@@ -229,6 +263,15 @@ export const pauseCampaign = async (req, res, next) => {
 export const resumeCampaign = async (req, res, next) => {
   try {
     const user = req.user;
+
+    if (user.role !== "client") {
+      throw new AppError(
+        "Client API Key (x-api-key) is required to resume campaigns.",
+        403,
+        "ERR_CLIENT_KEY_REQUIRED"
+      );
+    }
+
     const { id } = req.params;
 
     const campaign = await Campaign.findOne({ _id: id, user: user._id });
@@ -260,6 +303,15 @@ export const resumeCampaign = async (req, res, next) => {
 export const deleteCampaign = async (req, res, next) => {
   try {
     const user = req.user;
+
+    if (user.role !== "client") {
+      throw new AppError(
+        "Client API Key (x-api-key) is required to delete campaigns.",
+        403,
+        "ERR_CLIENT_KEY_REQUIRED"
+      );
+    }
+
     const { id } = req.params;
 
     const campaign = await Campaign.findOne({ _id: id, user: user._id });
@@ -340,6 +392,68 @@ export const syncClient = async (req, res, next) => {
       },
     });
 
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// 3a. GET CLIENTS (admin/partner view assigned clients)
+// ─────────────────────────────────────────────────────────────
+export const getClients = async (req, res, next) => {
+  try {
+    const partnerUser = req.user;
+    const clients = await User.find({ role: "client", assignedAdmin: partnerUser._id })
+      .select("name email company approvalStatus createdAt");
+    
+    const formattedClients = clients.map(c => ({
+      clientId: c._id,
+      name: c.name,
+      email: c.email,
+      businessName: c.company,
+      approvalStatus: c.approvalStatus,
+      createdAt: c.createdAt
+    }));
+
+    successResponse(res, formattedClients, "Partner clients fetched successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// 3b. GET CLIENT CAMPAIGNS (admin/partner view client ads & stats)
+// ─────────────────────────────────────────────────────────────
+export const getClientCampaigns = async (req, res, next) => {
+  try {
+    const partnerUser = req.user;
+    const { clientId } = req.params;
+
+    const client = await User.findOne({ _id: clientId, role: "client", assignedAdmin: partnerUser._id });
+    if (!client) {
+      throw new AppError("Client not found or not assigned to you", 404, "ERR_CLIENT_NOT_FOUND");
+    }
+
+    const campaigns = await Campaign.find({ user: clientId });
+    
+    const formattedCampaigns = campaigns.map(c => ({
+      campaignId: c._id,
+      name: c.name,
+      platform: c.platform,
+      objective: c.objective,
+      status: c.status,
+      budget: c.budget,
+      insights: {
+        impressions: c.insights?.impressions || 0,
+        clicks: c.insights?.clicks || 0,
+        spend: c.insights?.spend || 0,
+        reach: c.insights?.reach || 0,
+        ctr: c.insights?.ctr || 0,
+        cpc: c.insights?.cpc || 0
+      }
+    }));
+
+    successResponse(res, formattedCampaigns, "Client campaigns fetched successfully");
   } catch (err) {
     next(err);
   }

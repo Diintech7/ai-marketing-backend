@@ -232,7 +232,8 @@ const CampaignService = {
               videoId,
               imageUrl: ad.imageUrl,
               thumbnailUrl: finalThumbnailUrl,
-              link: ad.link || campaign.link || "https://www.example.com"
+              link: ad.link || campaign.link || "https://www.example.com",
+              objective: campaign.objective
             });
 
             const metaAd = await MetaService.createAd(accessToken, adAccountId, {
@@ -311,7 +312,8 @@ const CampaignService = {
           const agId = await GoogleAdsService.createAdGroup(creds, gcId, campaign);
           updates.googleAdGroupId = agId;
           
-          if (campaign.aiContent && campaign.aiContent.keywords) {
+          // App campaigns do not support manual keyword targeting at the ad group level
+          if (campaign.googleAdType !== "app" && campaign.aiContent && campaign.aiContent.keywords) {
             await GoogleAdsService.addKeywordsToAdGroup(creds, agId, campaign.aiContent.keywords);
           }
 

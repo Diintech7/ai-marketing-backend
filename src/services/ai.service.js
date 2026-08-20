@@ -136,13 +136,14 @@ Return ONLY valid JSON:
   analyzePerformance: async (input) => {
     const systemPrompt = `You are an expert digital marketing AI analyst. 
 Given the following campaign metrics (spend, impressions, clicks, ctr, cpc, budget, objective, status), analyze the health of the campaign.
+Provide highly specific, actionable, and metric-based recommendations with exact suggested values (e.g., recommend increasing the budget to a specific minimum amount like ₹500 based on the current budget, or suggesting precise targeting/location changes). Do NOT give generic or vague advice.
 Return ONLY valid JSON in the exact following format:
 {
   "healthScore": 85,
   "analysis": "A short 1-2 sentence overall analysis.",
   "recommendations": [
-    "A specific, actionable recommendation to improve CTR or CPC.",
-    "Another recommendation about budget or targeting.",
+    "A specific, actionable recommendation to improve CTR or CPC with exact numbers.",
+    "Another recommendation about budget or targeting with exact numbers and values.",
     "A third recommendation."
   ]
 }`;
