@@ -21,6 +21,7 @@ router.delete("/partner/campaigns/:id",    ctrl.deleteCampaign);          // Del
 router.post("/partner/sync-client",        ctrl.syncClient);              // Register external client
 router.get("/partner/clients",             ctrl.getClients);              // Get list of synced clients (admin only)
 router.get("/partner/clients/:clientId/campaigns", ctrl.getClientCampaigns); // Get list of client campaigns (admin only)
+router.get("/partner/clients/:clientId/analytics-summary", ctrl.getClientAnalyticsSummary); // Get platform analytics summary (admin only)
 router.get("/partner/activities",          ctrl.getActivityLogs);         // Fetch logs with filters
 router.put("/partner/webhook-url",         ctrl.updateWebhookUrl);        // Set webhook URL
 

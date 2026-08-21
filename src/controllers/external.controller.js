@@ -199,6 +199,9 @@ export const getCampaignStatus = async (req, res, next) => {
       budget:       campaign.budget,
       startDate:    campaign.startDate,
       endDate:      campaign.endDate,
+      targeting:    campaign.adSets?.[0]?.targeting || null,
+      aiContent:    campaign.aiContent || null,
+      ads:          campaign.ads || [],
       platformBreakdown: campaign.insights?.platformBreakdown || null,
       insights: {
         impressions: campaign.insights?.impressions || 0,
@@ -454,6 +457,80 @@ export const getClientCampaigns = async (req, res, next) => {
     }));
 
     successResponse(res, formattedCampaigns, "Client campaigns fetched successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// 3c. GET CLIENT ANALYTICS SUMMARY (admin/partner view aggregated stats)
+// ─────────────────────────────────────────────────────────────
+export const getClientAnalyticsSummary = async (req, res, next) => {
+  try {
+    const partnerUser = req.user;
+    const { clientId } = req.params;
+
+    const client = await User.findOne({ _id: clientId, role: "client", assignedAdmin: partnerUser._id });
+    if (!client) {
+      throw new AppError("Client not found or not assigned to you", 404, "ERR_CLIENT_NOT_FOUND");
+    }
+
+    const campaigns = await Campaign.find({ user: clientId });
+
+    const meta = { spend: 0, impressions: 0, clicks: 0, reach: 0 };
+    const google = { spend: 0, impressions: 0, clicks: 0, reach: 0 };
+
+    for (const c of campaigns) {
+      const breakdown = c.insights?.platformBreakdown || {};
+      const cInsights = c.insights || {};
+
+      if (c.platform === "meta") {
+        meta.spend += cInsights.spend || 0;
+        meta.impressions += cInsights.impressions || 0;
+        meta.clicks += cInsights.clicks || 0;
+        meta.reach += cInsights.reach || 0;
+      } else if (c.platform === "google") {
+        google.spend += cInsights.spend || 0;
+        google.impressions += cInsights.impressions || 0;
+        google.clicks += cInsights.clicks || 0;
+        google.reach += cInsights.reach || 0;
+      } else if (c.platform === "both") {
+        // Extract meta split details
+        if (breakdown.meta) {
+          meta.spend += breakdown.meta.spend || 0;
+          meta.impressions += breakdown.meta.impressions || 0;
+          meta.clicks += breakdown.meta.clicks || 0;
+          meta.reach += breakdown.meta.reach || 0;
+        }
+        // Extract google split details
+        if (breakdown.google) {
+          google.spend += breakdown.google.spend || 0;
+          google.impressions += breakdown.google.impressions || 0;
+          google.clicks += breakdown.google.clicks || 0;
+          google.reach += breakdown.google.reach || 0;
+        }
+      }
+    }
+
+    // Format stats helper
+    const formatStats = (stats) => {
+      const ctr = stats.impressions > 0 ? Number(((stats.clicks / stats.impressions) * 100).toFixed(2)) : 0;
+      const cpc = stats.clicks > 0 ? Number((stats.spend / stats.clicks).toFixed(2)) : 0;
+      return {
+        totalSpend: stats.spend,
+        totalImpressions: stats.impressions,
+        totalClicks: stats.clicks,
+        totalReach: stats.reach,
+        ctr,
+        cpc
+      };
+    };
+
+    successResponse(res, {
+      clientId,
+      metaSummary: formatStats(meta),
+      googleSummary: formatStats(google)
+    }, "Client platform analytics summary fetched successfully");
   } catch (err) {
     next(err);
   }
